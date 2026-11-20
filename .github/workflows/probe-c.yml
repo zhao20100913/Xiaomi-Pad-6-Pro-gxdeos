@@ -1,0 +1,88 @@
+name: probe-c
+on:
+  workflow_dispatch:
+    inputs:
+      gxde_mirror:
+        description: GXDE package mirror
+        required: false
+        default: https://repo.gxde.top/gxde-os/lizhi
+      gxde_source_sha256:
+        description: Optional sha256 pin for gxde-source_1.1.11_all.deb
+        required: false
+        default: ''
+      install_spark_store:
+        description: Install spark-store (GXDE app store, ~85 MB)
+        type: boolean
+        required: false
+        default: false
+      build_image:
+        description: Also assemble the flashable bundle (needs the self-hosted runner)
+        type: boolean
+        required: false
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - 'tools/gxde/**'
+      - 'device/gxde-overlay/**'
+      - 'tools/build-liuqin-debs.sh'
+      - 'kernel/source.json'
+      - '.github/workflows/gxde.yml'
+permissions:
+  contents: read
+concurrency:
+  group: gxde-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  gxde-rootfs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            mmdebstrap debian-archive-keyring zstd qemu-user-static binfmt-support \
+            python3 curl ca-certificates
+          ls -l /proc/sys/fs/binfmt_misc/qemu-aarch64
+      - name: Fetch the kernel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gxde-kernel-${{ github.sha }}
+          path: out/kernel
+      - name: Build the GXDE root
+        env:
+          GXDE_MIRROR: ${{ inputs.gxde_mirror || 'https://repo.gxde.top/gxde-os/lizhi' }}
+          GXDE_SOURCE_SHA256: ${{ inputs.gxde_source_sha256 }}
+          GXDE_INSTALL_SPARK_STORE: ${{ inputs.install_spark_store && '1' || '0' }}
+          KERNEL_MODULES_DIR: ${{ github.workspace }}/out/kernel/modules
+          OUT_DIR: ${{ github.workspace }}/out/gxde
+        run: |
+          sudo -E tools/gxde/build-gxde-rootfs.sh bootstrap
+          sudo -E tools/gxde/build-gxde-rootfs.sh desktop
+          sudo -E tools/gxde/build-gxde-rootfs.sh device
+          sudo -E tools/gxde/build-gxde-rootfs.sh assemble
+          sudo -E tools/gxde/build-gxde-rootfs.sh check
+          sudo -E tools/gxde/build-gxde-rootfs.sh manifest
+          sudo -E tools/gxde/build-gxde-rootfs.sh pack
+      - name: Upload the root
+        uses: actions/upload-artifact@v4
+        with:
+          name: gxde-rootfs-${{ github.sha }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          path: |
+            out/gxde/rootfs.tar.zst
+            out/gxde/rootfs.tar.zst.sha256
+            out/gxde/gxde-rootfs.manifest
+            out/gxde/gxde-rootfs.hashes
+            out/gxde/gxde-rootfs.identity
