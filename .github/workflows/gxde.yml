@@ -76,7 +76,7 @@ jobs:
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libc6-dev-arm64-cross
       - uses: actions/checkout@v4
         with:
-          repository: ${{ vars.LIUQIN_KERNEL_REPO || format('{0}/linux-sm8450-liuqin', github.repository_owner) }}
+          repository: ${{ vars.LIUQIN_KERNEL_REPO || 'yzddmr6/linux-sm8450-liuqin' }}
           ref: ${{ steps.kernel.outputs.sha }}
           path: linux-sm8450-liuqin
           fetch-depth: 0
@@ -197,7 +197,7 @@ jobs:
           sudo test -x out/gxde/rootfs/usr/lib/systemd/systemd
       - uses: actions/checkout@v4
         with:
-          repository: ${{ vars.LIUQIN_KERNEL_REPO || format('{0}/linux-sm8450-liuqin', github.repository_owner) }}
+          repository: ${{ vars.LIUQIN_KERNEL_REPO || 'yzddmr6/linux-sm8450-liuqin' }}
           ref: ${{ needs.kernel.outputs.sha }}
           path: linux-sm8450-liuqin
           fetch-depth: 0
