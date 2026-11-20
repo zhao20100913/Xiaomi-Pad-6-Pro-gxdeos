@@ -28,6 +28,10 @@ on:
         type: boolean
         required: false
         default: false
+      kernel_run_id:
+        description: Reuse the kernel artifact of this run id instead of rebuilding it
+        required: false
+        default: ''
       build_image:
         description: Also assemble the flashable bundle (needs the self-hosted runner)
         type: boolean
@@ -43,12 +47,14 @@ on:
       - '.github/workflows/gxde.yml'
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: gxde-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   kernel:
+    if: inputs.kernel_run_id == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 300
     outputs:
@@ -129,14 +135,31 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
-            mmdebstrap debian-archive-keyring zstd qemu-user-static binfmt-support \
+            mmdebstrap arch-test debian-archive-keyring zstd qemu-user-static \
+            binfmt-support \
             python3 curl ca-certificates
           ls -l /proc/sys/fs/binfmt_misc/qemu-aarch64
-      - name: Fetch the kernel artifact
+      - name: Fetch the kernel artifact of this run
+        if: inputs.kernel_run_id == ''
         uses: actions/download-artifact@v4
         with:
           name: gxde-kernel-${{ github.sha }}
           path: out/kernel
+      - name: Fetch the kernel artifact of an earlier run
+        if: inputs.kernel_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gxde-kernel-*
+          run-id: ${{ inputs.kernel_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: out/kernel-fetch
+      - name: Lay the reused kernel artifact out
+        if: inputs.kernel_run_id != ''
+        run: |
+          test -d out/kernel-fetch
+          mkdir -p out/kernel
+          for dir in out/kernel-fetch/*/; do cp -a "$dir". out/kernel/; done
+          ls out/kernel
       - name: Build the GXDE root
         env:
           GXDE_MIRROR: ${{ inputs.gxde_mirror || 'https://repo.gxde.top/gxde-os/lizhi' }}
