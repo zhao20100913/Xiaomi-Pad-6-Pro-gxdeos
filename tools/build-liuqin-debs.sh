@@ -49,6 +49,9 @@ power_keyd_source=${POWER_KEYD_SOURCE:-"$project_root/device/power-key/liuqin-po
 uinput_automation_source=${UINPUT_AUTOMATION_SOURCE:-"$project_root/device/input/liuqin-uinput-automation.c"}
 audio_probe_source=${AUDIO_PROBE_SOURCE:-"$project_root/device/audio-topology/liuqin-audio-hwparams-probe.c"}
 power_settings_binary=${POWER_SETTINGS_BINARY:-"$project_root/out/gnome-control-center/gnome-control-center"}
+# A distro without Ubuntu's Settings package (e.g. the Debian/GXDE port) can
+# replace the dependency string; the default keeps the Ubuntu 26.04 contract.
+device_support_deps=${LIUQIN_DEVICE_SUPPORT_DEPS:-'libasound2t64 (>= 1.2), gnome-control-center (>= 1:50.0), python3-gi, python3-pyudev, init-system-helpers'}
 power_settings_sha256=${POWER_SETTINGS_SHA256:-}
 power_settings_manifest=${POWER_SETTINGS_MANIFEST:-"$project_root/out/gnome-control-center/build-info.json"}
 # SENSOR_STACK_SHA256 selects the sensor build to include in this package set.
@@ -189,7 +192,8 @@ build_device_support() {
 		die 'the overlay carries no reviewed WebKit fallback environment file'
 	sha_ok "$overlay/$webkit_env" "$webkit_env_sha256" \
 		'the overlay WebKit fallback is not the reviewed legacy-compositor revision'
-	if [ -f "$overlay/usr/share/liuqin/power/io.github.liuqin.power.gschema.xml" ]; then
+	if [ -f "$overlay/usr/share/liuqin/power/io.github.liuqin.power.gschema.xml" ] &&
+		[ -n "$power_settings_binary" ]; then
 		[ -f "$power_settings_binary" ] && [ ! -L "$power_settings_binary" ] ||
 			die 'build the reviewed native power settings component or set POWER_SETTINGS_BINARY'
 		if [ -z "$power_settings_sha256" ]; then
@@ -319,7 +323,11 @@ EOF
 		die 'power-key daemon is not an AArch64 executable'
 	install -D -m 0755 "$busybox" "$root/usr/local/bin/busybox"
 	if [ -f "$overlay/usr/share/liuqin/power/io.github.liuqin.power.gschema.xml" ]; then
-		install -D -m 0755 "$power_settings_binary" "$root/usr/bin/gnome-control-center"
+		# The schema is always compiled (the native contract pins it); the
+		# Ubuntu-built Settings binary is only shipped when one was provided.
+		if [ -n "$power_settings_binary" ]; then
+			install -D -m 0755 "$power_settings_binary" "$root/usr/bin/gnome-control-center"
+		fi
 		command -v glib-compile-schemas >/dev/null || die 'glib-compile-schemas is required'
 		glib-compile-schemas --strict "$root/usr/share/liuqin/power"
 		chmod 0644 "$root/usr/share/liuqin/power/gschemas.compiled"
@@ -394,7 +402,7 @@ if [ "$1" = purge ]; then
     deb-systemd-helper --user purge mainline-release-notifier.timer >/dev/null
 fi
 EOF
-	pack "$pkg" arm64 'libasound2t64 (>= 1.2), gnome-control-center (>= 1:50.0), python3-gi, python3-pyudev, init-system-helpers'  \
+	pack "$pkg" arm64 "$device_support_deps"  \
 		'Xiaomi Pad 6 Pro (liuqin) device support: units, helpers, key-only USB maintenance, power panel'
 }
 

@@ -1,0 +1,49 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# GXDE login-path repair.  Everything it does is also done at build time; this
+# runs on every boot so a package upgrade (lightdm being reinstalled as the
+# GXDE greeter, gdm3 being reconfigured) cannot silently take the seat away
+# from the GXDE session.
+#
+# It only touches a root that carries the GXDE marker, and it is idempotent.
+set -eu
+
+marker=/etc/liuqin-gxde-root
+[ -f "$marker" ] || exit 0
+
+log() { printf 'liuqin-gxde-firstboot: %s\n' "$*" >&2; }
+
+# --- display manager: gdm3 owns the seat ------------------------------------
+# GXDE recommends lightdm (startgxde) and ships gxdm as an alternative.  Both
+# would fight gdm3 for /etc/systemd/system/display-manager.service.
+for unit in lightdm gxdm; do
+	[ -f "/lib/systemd/system/$unit.service" ] || continue
+	if [ "$(readlink -f "/etc/systemd/system/$unit.service" 2>/dev/null)" != /dev/null ]; then
+		systemctl mask "$unit.service" >/dev/null 2>&1 || log "could not mask $unit.service"
+		log "masked $unit.service (gdm3 is the display manager on this port)"
+	fi
+done
+if [ -f /lib/systemd/system/gdm3.service ] || [ -f /usr/lib/systemd/system/gdm3.service ]; then
+	ln -sfn /lib/systemd/system/gdm3.service /etc/systemd/system/display-manager.service
+	systemctl unmask gdm3.service >/dev/null 2>&1 || true
+	systemctl enable gdm3.service >/dev/null 2>&1 || log 'could not enable gdm3.service'
+fi
+
+# --- account and session ----------------------------------------------------
+user=liuqin
+if ! id "$user" >/dev/null 2>&1; then
+	log "creating the $user account"
+	useradd --create-home --uid 1000 --shell /bin/bash --comment 'liuqin' "$user"
+	passwd --lock "$user" >/dev/null 2>&1 || true
+fi
+session=$(sed -n 's/^session=//p' /etc/liuqin-gxde-session 2>/dev/null || true)
+if [ -n "$session" ] && [ -d /var/lib/AccountsService/users ]; then
+	printf '[User]\nSystemAccount=false\nXSession=%s\n' "$session" \
+		>"/var/lib/AccountsService/users/$user"
+	chown root:root "/var/lib/AccountsService/users/$user"
+	chmod 0600 "/var/lib/AccountsService/users/$user"
+fi
+systemctl set-default graphical.target >/dev/null 2>&1 || true
+
+exit 0

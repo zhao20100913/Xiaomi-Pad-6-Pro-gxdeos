@@ -1,0 +1,15 @@
+[Unit]
+Description=GXDE login path repair (Xiaomi Pad 6 Pro)
+Documentation=https://github.com/yzddmr6/xiaomipad-6pro-mainline
+ConditionPathExists=/etc/liuqin-gxde-root
+After=local-fs.target var-lib-AccountsService.mount
+Before=display-manager.service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/liuqin-gxde-firstboot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

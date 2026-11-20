@@ -35,9 +35,14 @@
 | 安装 Ubuntu | [安装指南](docs/FLASHING.md) |
 | 升级已安装的系统 | [升级已安装的系统](docs/INSTALL-TESTING.md#升级已安装的系统) |
 | 自行编译内核和设备组件 | [构建指南](docs/BUILD.md) |
+| 换成 GXDE 桌面（Debian 13） | [GXDE 移植说明](docs/GXDE.md) |
 | 恢复 Android | [数据与恢复说明](docs/FLASHING.md#数据与恢复) |
 
 预编译安装包包括匹配的启动镜像、根文件系统、安装工具与校验文件。
+
+GXDE 移植由 [`.github/workflows/gxde.yml`](.github/workflows/gxde.yml) 构建：宿主 runner 产出
+Debian trixie + GXDE 的 arm64 根文件系统（gdm3 负责登录，GXDE 作为会话），打包成可刷写的
+安装包则需要带原厂输入的自托管 runner。它沿用本项目的启动链与设备层，不修改 initramfs。
 
 ## 硬件支持
 
