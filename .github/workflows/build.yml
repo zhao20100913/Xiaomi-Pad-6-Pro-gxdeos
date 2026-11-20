@@ -40,4 +40,4 @@ jobs:
       - uses: ./project/.github/actions/kernel
         if: steps.affected.outputs.needed == 'true'
         with:
-          kernel-repository: ${{ github.repository_owner }}/linux-sm8450-liuqin
+          kernel-repository: ${{ vars.LIUQIN_KERNEL_REPO || 'yzddmr6/linux-sm8450-liuqin' }}
