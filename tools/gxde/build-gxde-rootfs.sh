@@ -470,7 +470,7 @@ END {
 kernel_release() {
 	if [ -f "$root/usr/share/liuqin/kernel.release" ]; then
 		cat "$root/usr/share/liuqin/kernel.release"
-	elif [ -n "$KERNEL_RELEASE" ]; then
+	elif [ -n "${KERNEL_RELEASE:-}" ]; then
 		printf '%s\n' "$KERNEL_RELEASE"
 	else
 		printf 'unknown\n'
