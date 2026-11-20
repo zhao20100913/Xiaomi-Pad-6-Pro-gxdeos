@@ -1,4 +1,5 @@
 name: GXDE OS (liuqin)
+# Entry point: docs/GXDE.md
 # Build the GXDE OS port for the Xiaomi Pad 6 Pro (liuqin).
 #
 #   kernel       the locked mainline kernel (public, hosted runner)
