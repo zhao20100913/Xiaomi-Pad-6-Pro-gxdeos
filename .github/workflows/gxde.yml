@@ -162,21 +162,62 @@ jobs:
           mkdir -p out/kernel
           for dir in out/kernel-fetch/*/; do cp -a "$dir". out/kernel/; done
           ls out/kernel
-      - name: Build the GXDE root
+      - name: Bootstrap Debian trixie arm64
         env:
           GXDE_MIRROR: ${{ inputs.gxde_mirror || 'https://repo.gxde.top/gxde-os/lizhi' }}
           GXDE_SOURCE_SHA256: ${{ inputs.gxde_source_sha256 }}
           GXDE_INSTALL_SPARK_STORE: ${{ inputs.install_spark_store && '1' || '0' }}
           KERNEL_MODULES_DIR: ${{ github.workspace }}/out/kernel/modules
           OUT_DIR: ${{ github.workspace }}/out/gxde
-        run: |
-          sudo -E tools/gxde/build-gxde-rootfs.sh bootstrap
-          sudo -E tools/gxde/build-gxde-rootfs.sh desktop
-          sudo -E tools/gxde/build-gxde-rootfs.sh device
-          sudo -E tools/gxde/build-gxde-rootfs.sh assemble
-          sudo -E tools/gxde/build-gxde-rootfs.sh check
-          sudo -E tools/gxde/build-gxde-rootfs.sh manifest
-          sudo -E tools/gxde/build-gxde-rootfs.sh pack
+        run: sudo -E tools/gxde/build-gxde-rootfs.sh bootstrap
+      - name: Install the GXDE desktop
+        env:
+          GXDE_MIRROR: ${{ inputs.gxde_mirror || 'https://repo.gxde.top/gxde-os/lizhi' }}
+          GXDE_SOURCE_SHA256: ${{ inputs.gxde_source_sha256 }}
+          GXDE_INSTALL_SPARK_STORE: ${{ inputs.install_spark_store && '1' || '0' }}
+          KERNEL_MODULES_DIR: ${{ github.workspace }}/out/kernel/modules
+          OUT_DIR: ${{ github.workspace }}/out/gxde
+        run: sudo -E tools/gxde/build-gxde-rootfs.sh desktop
+      - name: Install the liuqin device layer
+        env:
+          GXDE_MIRROR: ${{ inputs.gxde_mirror || 'https://repo.gxde.top/gxde-os/lizhi' }}
+          GXDE_SOURCE_SHA256: ${{ inputs.gxde_source_sha256 }}
+          GXDE_INSTALL_SPARK_STORE: ${{ inputs.install_spark_store && '1' || '0' }}
+          KERNEL_MODULES_DIR: ${{ github.workspace }}/out/kernel/modules
+          OUT_DIR: ${{ github.workspace }}/out/gxde
+        run: sudo -E tools/gxde/build-gxde-rootfs.sh device
+      - name: Assemble the boot contract
+        env:
+          GXDE_MIRROR: ${{ inputs.gxde_mirror || 'https://repo.gxde.top/gxde-os/lizhi' }}
+          GXDE_SOURCE_SHA256: ${{ inputs.gxde_source_sha256 }}
+          GXDE_INSTALL_SPARK_STORE: ${{ inputs.install_spark_store && '1' || '0' }}
+          KERNEL_MODULES_DIR: ${{ github.workspace }}/out/kernel/modules
+          OUT_DIR: ${{ github.workspace }}/out/gxde
+        run: sudo -E tools/gxde/build-gxde-rootfs.sh assemble
+      - name: Check the assembled root
+        env:
+          GXDE_MIRROR: ${{ inputs.gxde_mirror || 'https://repo.gxde.top/gxde-os/lizhi' }}
+          GXDE_SOURCE_SHA256: ${{ inputs.gxde_source_sha256 }}
+          GXDE_INSTALL_SPARK_STORE: ${{ inputs.install_spark_store && '1' || '0' }}
+          KERNEL_MODULES_DIR: ${{ github.workspace }}/out/kernel/modules
+          OUT_DIR: ${{ github.workspace }}/out/gxde
+        run: sudo -E tools/gxde/build-gxde-rootfs.sh check
+      - name: Write the root manifest
+        env:
+          GXDE_MIRROR: ${{ inputs.gxde_mirror || 'https://repo.gxde.top/gxde-os/lizhi' }}
+          GXDE_SOURCE_SHA256: ${{ inputs.gxde_source_sha256 }}
+          GXDE_INSTALL_SPARK_STORE: ${{ inputs.install_spark_store && '1' || '0' }}
+          KERNEL_MODULES_DIR: ${{ github.workspace }}/out/kernel/modules
+          OUT_DIR: ${{ github.workspace }}/out/gxde
+        run: sudo -E tools/gxde/build-gxde-rootfs.sh manifest
+      - name: Pack the root
+        env:
+          GXDE_MIRROR: ${{ inputs.gxde_mirror || 'https://repo.gxde.top/gxde-os/lizhi' }}
+          GXDE_SOURCE_SHA256: ${{ inputs.gxde_source_sha256 }}
+          GXDE_INSTALL_SPARK_STORE: ${{ inputs.install_spark_store && '1' || '0' }}
+          KERNEL_MODULES_DIR: ${{ github.workspace }}/out/kernel/modules
+          OUT_DIR: ${{ github.workspace }}/out/gxde
+        run: sudo -E tools/gxde/build-gxde-rootfs.sh pack
       - name: Upload the root
         uses: actions/upload-artifact@v4
         with:

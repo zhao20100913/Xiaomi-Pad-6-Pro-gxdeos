@@ -247,7 +247,7 @@ stage_desktop() {
 	in_root ln -sf "/usr/share/zoneinfo/$gxde_timezone" /etc/localtime || true
 	printf '%s\n' "$gxde_timezone" >"$root/etc/timezone"
 	in_root apt-get clean
-	rm -rf "$root/var/lib/apt/lists"/*
+	# Keep the package lists: the device stage may still have debs to install.
 }
 
 # ---------------------------------------------------------------------------
@@ -495,6 +495,8 @@ stage_manifest() {
 stage_pack() {
 	unmount_root
 	command -v zstd >/dev/null || die 'zstd is required to pack the rootfs'
+	rm -rf "$root/var/cache/apt/archives"/*.deb "$root/var/cache/apt/archives"/partial
+	rm -rf "$root/var/lib/apt/lists"/*
 	say 'packing rootfs.tar.zst'
 	rm -f "$out_dir/rootfs.tar.zst" "$out_dir/rootfs.tar.zst.sha256"
 	(
