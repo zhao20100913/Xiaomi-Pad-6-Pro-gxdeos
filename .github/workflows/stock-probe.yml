@@ -1,10 +1,7 @@
 name: Stock ROM probe
-# Development probe: download the liuqin fastboot ROM and report what is inside
-# it, so the GXDE image pipeline can be written against the real layout instead
-# of guesses.  It only inspects; it never builds anything.
-#
-# Delete this workflow once tools/gxde/prepare-stock-inputs.py handles the ROM
-# unaided.
+# Development probe: download the liuqin fastboot ROM, unpacks its super image
+# and reports where the files the device layer needs actually live.  Delete it
+# once tools/gxde/prepare-stock-inputs.py covers the whole extraction.
 on:
   workflow_dispatch:
     inputs:
@@ -22,6 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
+      - uses: actions/checkout@v4
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
@@ -31,52 +29,55 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            android-sdk-libsparse-utils e2fsprogs erofs-utils file jq
+            e2fsprogs erofs-utils file jq
           df -h /
       - name: Download the ROM
         env:
           ROM_URL: ${{ inputs.rom_url }}
         run: |
-          set -x
-          curl -fL --retry 3 --retry-delay 5 --connect-timeout 30 -o rom.tgz "$ROM_URL"
+          curl -fL --retry 3 --retry-delay 5 --connect-timeout 30 --silent --show-error -o rom.tgz "$ROM_URL"
           ls -l rom.tgz
-          df -h /
-      - name: List the archive
+      - name: Extract the images
         run: |
-          tar tzvf rom.tgz > archive.txt 2>&1 || true
-          wc -l archive.txt
-          grep -E 'images/|\.img$' archive.txt | head -80 | tee report.txt
-          echo '--- top level ---' | tee -a report.txt
-          awk '{print $6}' archive.txt | cut -d/ -f1 | sort -u | head -20 | tee -a report.txt
-      - name: Extract super and dtbo
+          mkdir -p rom
+          tar xzvf rom.tgz -C rom --strip-components=2 --wildcards \
+            '*/images/super.img' '*/images/NON-HLOS.bin' '*/images/BTFM.bin' '*/images/dtbo.img'
+          ls -l rom/ | tee report.txt
+          file rom/* | tee -a report.txt
+      - name: Unpack super
         run: |
-          tar xzvf rom.tgz --wildcards 'images/super.img' 'images/dtbo.img' 'images/vendor_boot.img' 2>&1 | tail -5 || true
-          ls -l images/ 2>/dev/null | tee -a report.txt
-          file images/*.img 2>/dev/null | tee -a report.txt
-      - name: Unsparse super
+          set -x
+          python3 tools/gxde/prepare-stock-inputs.py unsparse rom/super.img super.raw
+          ls -l super.raw
+          python3 tools/gxde/prepare-stock-inputs.py probe super.raw | tee -a report.txt
+      - name: Dump the partitions
         run: |
-          if file images/super.img | grep -qi sparse; then
-            simg2img images/super.img super.raw
-          else
-            cp images/super.img super.raw
-          fi
-          ls -l super.raw | tee -a report.txt
-          python3 - <<'PY'
-          import struct
-          data = open('super.raw', 'rb').read(4096 * 3)
-          geom = data[4096:4096 + 32]
-          magic, struct_size, checksum, meta_max, slot_count, block_size = struct.unpack('<IIIIII', geom[:24])
-          print(f'super.raw: {len(data)} bytes read')
-          print(f'geometry magic=0x{magic:08x} struct_size={struct_size} meta_max={meta_max} slots={slot_count} block={block_size}')
-          PY
-      - name: Keep the heads for inspection
+          set -x
+          python3 tools/gxde/prepare-stock-inputs.py unpack super.raw parts vendor vendor_a 2>&1 | tee -a report.txt || true
+          for image in parts/*.img; do
+            echo "== $image ($(stat -c%s "$image") bytes)" | tee -a report.txt
+            if python3 tools/gxde/prepare-stock-inputs.py fs-tree "$image" / 2>&1 | head -40; then :; fi | tee -a report.txt
+          done
+      - name: Look for the device-layer files
+        run: |
+          set +e
+          vendor=$(ls parts/vendor_a.img parts/vendor.img 2>/dev/null | head -1)
+          echo "vendor image: $vendor" | tee -a report.txt
+          for path in /etc/sensors /firmware /firmware/novatek /firmware/qca /lib/firmware; do
+            echo "== vendor $path" | tee -a report.txt
+            python3 tools/gxde/prepare-stock-inputs.py fs-tree "$vendor" "$path" 2>&1 | head -30 | tee -a report.txt
+          done
+          for image in rom/NON-HLOS.bin rom/BTFM.bin; do
+            for path in / /image; do
+              echo "== $image $path" | tee -a report.txt
+              python3 tools/gxde/prepare-stock-inputs.py fs-tree "$image" "$path" 2>&1 | head -40 | tee -a report.txt
+            done
+          done
+      - name: Keep the metadata head
         run: |
           head -c 24576 super.raw > super.head.bin
-          head -c 24576 images/super.img > super.img.head.bin 2>/dev/null || true
-          ls -l super.head.bin super.img.head.bin 2>/dev/null
-          df -h /
-      - name: Report
-        run: cat report.txt
+          head -c 24576 rom/super.img > super.sparse.head.bin 2>/dev/null || true
+          ls -l super.head.bin super.sparse.head.bin 2>/dev/null
       - uses: actions/upload-artifact@v4
         with:
           name: stock-probe-${{ github.run_id }}
@@ -84,6 +85,5 @@ jobs:
           retention-days: 3
           path: |
             report.txt
-            archive.txt
             super.head.bin
-            super.img.head.bin
+            super.sparse.head.bin
