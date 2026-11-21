@@ -253,8 +253,10 @@ jobs:
     # public sources. Manual dispatch only, because it downloads a 7 GB archive
     # and repacks a 9 GB root.
     needs: [kernel, gxde-rootfs]
+    # always() is required: without it a skipped dependency silently skips this
+    # job as well, which is exactly the reuse mode (kernel_run_id/rootfs_run_id).
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.build_image &&
+      always() && github.event_name == 'workflow_dispatch' && inputs.build_image &&
       (needs.gxde-rootfs.result == 'success' || inputs.rootfs_run_id != '')
     runs-on: ubuntu-24.04
     timeout-minutes: 360
