@@ -100,6 +100,10 @@ stage_sensors() {
 	need_root
 	[ -f "$out_dir/stock/rom-sensors/etc/sensors/sns_reg_config" ] ||
 		die 'run the stock stage first'
+	# The root archive deliberately omits the virtual filesystems, and the
+	# sensor builder bind-mounts into them.
+	mkdir -p "$root/proc" "$root/sys" "$root/dev/pts" "$root/run/systemd/resolve" "$root/tmp"
+	chmod 1777 "$root/tmp"
 	ROOTFS="$root" \
 	ROM_SENSORS="$out_dir/stock/rom-sensors/etc/sensors" \
 	OUT_DIR="$out_dir/sensors" \
