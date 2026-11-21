@@ -435,6 +435,19 @@ def fs_type(image: str, path: str) -> str:
     die(f"cannot stat {path}: unsupported filesystem {kind}")
 
 
+def fs_extract_all(image: str, out_dir: str) -> None:
+    """Unpack a whole partition; the erofs tools in Ubuntu 24.04 predate
+    `--extract=image:path`, so a single path cannot be pulled out."""
+    kind = fs_kind(image)
+    os.makedirs(out_dir, exist_ok=True)
+    if kind == "ext4":
+        subprocess.run([require("debugfs"), "-R", f"rdump / {out_dir}", image], check=True)
+    elif kind == "erofs":
+        subprocess.run([require("fsck.erofs"), f"--extract={out_dir}", image], check=True)
+    else:
+        die(f"cannot extract {image}: unsupported filesystem {kind}")
+
+
 def fs_dump(image: str, path: str, out_dir: str) -> None:
     """Copy one path (file or directory tree) out of the image."""
     kind = fs_kind(image)
@@ -629,10 +642,12 @@ def cmd_prepare(args: argparse.Namespace) -> int:
     extract_partition(super_image, layout, next(p for p in layout["tables"]["partitions"] if p["name"] == vendor_name), vendor_image)
     say(f"{vendor_name}: {os.path.getsize(vendor_image)} bytes")
 
+    say("unpacking the vendor filesystem")
+    vendor_tree = os.path.join(work, "vendor-tree")
+    fs_extract_all(vendor_image, vendor_tree)
+
     say("extracting the exact-ROM sensor stack")
-    sensor_root = os.path.join(work, "raw-sensors")
-    fs_dump(vendor_image, "/etc/sensors", sensor_root)
-    sensors = find_dir(sensor_root, lambda base, dirs, files: "config" in dirs and "sns_reg_config" in files)
+    sensors = find_dir(vendor_tree, lambda base, dirs, files: "config" in dirs and "sns_reg_config" in files)
     if not sensors:
         die("vendor/etc/sensors/config was not found in the vendor partition")
     sensor_dir_expectations(sensors)
@@ -641,9 +656,7 @@ def cmd_prepare(args: argparse.Namespace) -> int:
     say(f"sensor stack: {dest}")
 
     say("extracting the stock WLAN blobs")
-    wlan_root = os.path.join(work, "raw-wlan")
-    fs_dump(vendor_image, "/firmware_mnt/image/qca6490", wlan_root)
-    wlan_src = find_dir(wlan_root, lambda base, dirs, files: all(n in files for n in WLAN_INPUTS))
+    wlan_src = find_dir(vendor_tree, lambda base, dirs, files: all(n in files for n in WLAN_INPUTS))
     if not wlan_src:
         die("vendor/firmware_mnt/image/qca6490 was not found in the vendor partition")
     wlan_dir_expectations(wlan_src)
