@@ -335,13 +335,19 @@ jobs:
         id: kernel-ref
         run: |
           echo "sha=$(python3 -c 'import json;print(json.load(open("project/kernel/source.json"))["commit"])')" >>"$GITHUB_OUTPUT"
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ vars.LIUQIN_KERNEL_REPO || 'yzddmr6/linux-sm8450-liuqin' }}
-          ref: ${{ steps.kernel-ref.outputs.sha }}
-          path: linux-sm8450-liuqin
-          fetch-depth: 0
-          persist-credentials: false
+      # A full clone of the kernel branch takes minutes; the pinned commit is
+      # all this job needs, so fetch exactly it.
+      - name: Check out the locked kernel revision
+        run: |
+          set -eux
+          repo="${{ vars.LIUQIN_KERNEL_REPO || 'yzddmr6/linux-sm8450-liuqin' }}"
+          sha="${{ steps.kernel-ref.outputs.sha }}"
+          git init -q linux-sm8450-liuqin
+          cd linux-sm8450-liuqin
+          git remote add origin "https://github.com/$repo"
+          git fetch -q --depth=1 origin "$sha"
+          git checkout -q --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$sha"
       - name: Download the fastboot ROM
         env:
           ROM_URL: ${{ inputs.rom_url }}
