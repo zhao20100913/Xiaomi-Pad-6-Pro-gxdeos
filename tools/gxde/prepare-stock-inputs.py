@@ -707,9 +707,44 @@ def cmd_prepare(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_locate(args: argparse.Namespace) -> int:
+    """Search raw files for directory-entry names (diagnostic helper)."""
+    needles = [name.encode() for name in args.names]
+    for image in args.images:
+        if not os.path.exists(image):
+            say(f"{image}: missing")
+            continue
+        hits: list[str] = []
+        with open(image, "rb") as handle:
+            chunk = handle.read(8 << 20)
+            base = 0
+            while chunk:
+                for needle in needles:
+                    start = 0
+                    while True:
+                        found = chunk.find(needle, start)
+                        if found < 0:
+                            break
+                        hits.append(f"{image}:{base + found}:{needle.decode()}")
+                        if len(hits) >= 20:
+                            break
+                        start = found + 1
+                base += len(chunk)
+                chunk = handle.read(8 << 20)
+        say(f"{image}: {len(hits)} hit(s)")
+        for hit in hits[:20]:
+            say(f"  {hit}")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("locate", help="search images for directory-entry names")
+    p.add_argument("images", nargs="+")
+    p.add_argument("--names", nargs="+", required=True)
+    p.set_defaults(func=cmd_locate)
 
     p = sub.add_parser("probe", help="report logical partitions of a super image")
     p.add_argument("image")
