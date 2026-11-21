@@ -368,6 +368,21 @@ jobs:
         run: |
           # shellcheck disable=SC2086
           sudo -E sh project/tools/gxde/build-gxde-image.sh $STAGES
+      - name: Locate the stock WLAN blobs
+        if: failure()
+        run: |
+          set -ux
+          rm -rf /tmp/locate
+          mkdir -p /tmp/locate
+          tar xzf out/rom/rom.tgz -C /tmp/locate --strip-components=2 \
+            --wildcards '*/images/cust.img' '*/images/vm-bootsys.img' \
+            '*/images/vendor_boot.img' || true
+          file /tmp/locate/*.img || true
+          python3 project/tools/gxde/prepare-stock-inputs.py locate \
+            project/out/gxde/stock/work/super.raw \
+            /tmp/locate/cust.img /tmp/locate/vm-bootsys.img \
+            /tmp/locate/vendor_boot.img \
+            --names amss20.bin m3.bin regdb.bin bd_m81gf.elf || true
       - name: Upload the bundle
         if: hashFiles('project/out/gxde/bundle/bundle.json') != ''
         uses: actions/upload-artifact@v4
