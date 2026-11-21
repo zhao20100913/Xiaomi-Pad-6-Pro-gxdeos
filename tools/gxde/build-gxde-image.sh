@@ -104,6 +104,14 @@ stage_sensors() {
 	# sensor builder bind-mounts into them.
 	mkdir -p "$root/proc" "$root/sys" "$root/dev/pts" "$root/run/systemd/resolve" "$root/tmp"
 	chmod 1777 "$root/tmp"
+	# The packed root carries no /dev, so the chroot tests that allocate a PTY
+	# (umockdev) need the usual device symlinks before devpts is mounted.
+	[ -e "$root/dev/ptmx" ] || ln -sfn pts/ptmx "$root/dev/ptmx"
+	[ -e "$root/dev/fd" ] || ln -sfn /proc/self/fd "$root/dev/fd"
+	[ -e "$root/dev/stdin" ] || ln -sfn /proc/self/fd/0 "$root/dev/stdin"
+	[ -e "$root/dev/stdout" ] || ln -sfn /proc/self/fd/1 "$root/dev/stdout"
+	[ -e "$root/dev/stderr" ] || ln -sfn /proc/self/fd/2 "$root/dev/stderr"
+	[ -e "$root/dev/core" ] || ln -sfn /proc/kcore "$root/dev/core"
 	ROOTFS="$root" \
 	ROM_SENSORS="$out_dir/stock/rom-sensors/etc/sensors" \
 	OUT_DIR="$out_dir/sensors" \
