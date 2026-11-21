@@ -275,8 +275,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
             qemu-user-static binfmt-support debootstrap mmdebstrap arch-test \
-            debian-archive-keyring zstd squashfs-tools cpio gdisk e2fsprogs \
-            file jq m4 alsa-utils acl attr \
+            debian-archive-keyring zstd squashfs-tools erofs-utils cpio gdisk \
+            e2fsprogs android-sdk-libsparse-utils file jq m4 alsa-utils acl attr \
             build-essential bc bison flex libssl-dev libelf-dev libdrm-dev \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libc6-dev-arm64-cross \
             python3-pyelftools
@@ -379,8 +379,11 @@ jobs:
           if-no-files-found: ignore
           compression-level: 1
           retention-days: 3
+          # Keep the debug artifact small: the extracted super image alone is
+          # 9 GB and only the derived inputs are interesting.
           path: |
-            project/out/gxde/stock/
+            project/out/gxde/stock/rom-sensors/
+            project/out/gxde/stock/wlan-vendor/
+            project/out/gxde/stock/inputs.json
             project/out/gxde/wlan/
             project/out/gxde/topology/
-            project/out/gxde/sensors/artifacts/
