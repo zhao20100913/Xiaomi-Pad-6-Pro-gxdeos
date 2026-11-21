@@ -64,14 +64,19 @@ stage_pool() {
 }
 
 stage_wlan() {
-	say 'building the WLAN firmware tuple'
-	encoder=$out_dir/tools/ath11k-bdencoder
-	OUT="$encoder" sh "$project_root/tools/gxde/fetch-bdencoder.sh" >/dev/null
-	python3 "$project_root/tools/build-liuqin-wlan.py" \
-		--vendor "$out_dir/stock/wlan-vendor" \
-		--base-board "$project_root/device/firmware/usr/lib/firmware/ath11k/WCN6855/hw2.0/board-2.bin.zst" \
-		--bdencoder "$encoder" \
-		--out "$out_dir/wlan"
+	say 'assembling the WLAN firmware tuple'
+	# device/firmware already ships the processed WCN6855 set that the stock
+	# vendor blobs are normally turned into, so the tuple is rebuilt from it.
+	src=$project_root/device/firmware/usr/lib/firmware/updates/ath11k/WCN6855/hw2.0
+	tuple=$out_dir/wlan
+	[ -f "$src/amss.bin" ] || die "tracked WLAN firmware is missing: $src"
+	rm -rf "$tuple"
+	mkdir -p "$tuple/hw2.0" "$tuple/hw2.1"
+	for name in amss.bin m3.bin board-2.bin regdb.bin; do
+		install -m 0644 "$src/$name" "$tuple/hw2.0/$name"
+		ln -sf ../hw2.0/"$name" "$tuple/hw2.1/$name"
+	done
+	say "WLAN tuple: $tuple"
 }
 
 stage_topology() {
