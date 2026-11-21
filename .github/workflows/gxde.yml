@@ -317,9 +317,9 @@ jobs:
         run: |
           archive=$(find out/rootfs-dl -name rootfs.tar.zst | head -n 1)
           test -n "$archive"
-          mkdir -p out/gxde/root
-          sudo tar -I zstd -xf "$archive" -C out/gxde/root
-          sudo test -x out/gxde/root/usr/lib/systemd/systemd
+          mkdir -p project/out/gxde/root
+          sudo tar -I zstd -xf "$archive" -C project/out/gxde/root
+          sudo test -x project/out/gxde/root/usr/lib/systemd/systemd
       - name: Read the locked kernel revision
         id: kernel-ref
         run: |
@@ -341,8 +341,8 @@ jobs:
           ls -l out/rom/rom.tgz
       - name: Assemble the flashable bundle
         env:
-          OUT_DIR: ${{ github.workspace }}/out/gxde
-          GXDE_ROOT: ${{ github.workspace }}/out/gxde/root
+          OUT_DIR: ${{ github.workspace }}/project/out/gxde
+          GXDE_ROOT: ${{ github.workspace }}/project/out/gxde/root
           KERNEL_SOURCE: ${{ github.workspace }}/linux-sm8450-liuqin
           KERNEL_OUT: ${{ github.workspace }}/out/kernel
           ROM: ${{ github.workspace }}/out/rom/rom.tgz
@@ -352,14 +352,14 @@ jobs:
           # shellcheck disable=SC2086
           sudo -E project/tools/gxde/build-gxde-image.sh $STAGES
       - name: Upload the bundle
-        if: hashFiles('out/gxde/bundle/bundle.json') != ''
+        if: hashFiles('project/out/gxde/bundle/bundle.json') != ''
         uses: actions/upload-artifact@v4
         with:
           name: gxde-bundle-${{ github.sha }}
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
-          path: out/gxde/bundle/
+          path: project/out/gxde/bundle/
       - name: Upload the intermediate trees on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -369,8 +369,7 @@ jobs:
           compression-level: 1
           retention-days: 3
           path: |
-            out/gxde/stock/
-            out/gxde/wlan/
-            out/gxde/topology/
-            out/gxde/firmware-pool/
-            out/gxde/sensors/artifacts/
+            project/out/gxde/stock/
+            project/out/gxde/wlan/
+            project/out/gxde/topology/
+            project/out/gxde/sensors/artifacts/
