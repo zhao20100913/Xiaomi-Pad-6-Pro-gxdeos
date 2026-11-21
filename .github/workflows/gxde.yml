@@ -32,11 +32,23 @@ on:
         description: Reuse the kernel artifact of this run id instead of rebuilding it
         required: false
         default: ''
+      rootfs_run_id:
+        description: Reuse the GXDE root of this run id instead of rebuilding it
+        required: false
+        default: ''
       build_image:
-        description: Also assemble the flashable bundle (needs the self-hosted runner)
+        description: Also assemble the flashable bundle (downloads the ROM, ~7 GB)
         type: boolean
         required: false
         default: false
+      image_stages:
+        description: Stages of tools/gxde/build-gxde-image.sh to run (space separated)
+        required: false
+        default: tools stock pool wlan topology sensors modules debs device boot bundle
+      rom_url:
+        description: Fastboot ROM archive used for the sensor stack and WLAN blobs
+        required: false
+        default: https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS2.0.6.0.VMYCNXM/liuqin_images_OS2.0.6.0.VMYCNXM_20250318.0000.00_15.0_cn_c29f6de5df.tgz
   push:
     branches: [main]
     paths:
@@ -121,7 +133,7 @@ jobs:
   gxde-rootfs:
     # A skipped kernel (artifact reuse) must still run this job.
     needs: kernel
-    if: always() && needs.kernel.result != 'cancelled'
+    if: always() && needs.kernel.result != 'cancelled' && inputs.rootfs_run_id == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
@@ -146,7 +158,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: gxde-kernel-${{ github.sha }}
-          path: out/kernel
+          path: out/kernel-dl
       - name: Fetch the kernel artifact of an earlier run
         if: inputs.kernel_run_id != ''
         uses: actions/download-artifact@v4
@@ -154,13 +166,16 @@ jobs:
           pattern: gxde-kernel-*
           run-id: ${{ inputs.kernel_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: out/kernel-fetch
-      - name: Lay the reused kernel artifact out
-        if: inputs.kernel_run_id != ''
+          path: out/kernel-dl
+      - name: Lay the kernel artifact out
         run: |
-          test -d out/kernel-fetch
+          # The artifact keeps the workflow-relative paths (project/out/kernel/…).
+          src=$(find out/kernel-dl -type d -path '*/project/out/kernel' | head -n 1)
+          test -n "$src" || { echo 'kernel artifact has no project/out/kernel directory'; exit 1; }
           mkdir -p out/kernel
-          for dir in out/kernel-fetch/*/; do cp -a "$dir". out/kernel/; done
+          cp -a "$src"/. out/kernel/
+          test -f out/kernel/arch/arm64/boot/Image
+          test -f out/kernel/include/config/kernel.release
           ls out/kernel
       - name: Bootstrap Debian trixie arm64
         env:
@@ -233,56 +248,129 @@ jobs:
             out/gxde/gxde-rootfs.identity
 
   image:
-    # Same gate as the upstream image workflow: trusted main code only, and only
-    # on the runner that owns the non-redistributable stock inputs.
-    # The image job needs the root this same run produced, nothing else.
-    if: >-
-      vars.LIUQIN_IMAGE_CI == 'enabled' && github.ref == 'refs/heads/main' &&
-      (github.event_name == 'push' || inputs.build_image) &&
-      needs.gxde-rootfs.result == 'success'
+    # Hosted, fully public pipeline: the ROM supplies the exact sensor stack and
+    # the four WLAN blobs; everything else is rebuilt from this repository and
+    # public sources. Manual dispatch only, because it downloads a 7 GB archive
+    # and repacks a 9 GB root.
     needs: [kernel, gxde-rootfs]
-    runs-on: [self-hosted, linux, X64, liuqin-images]
-    timeout-minutes: 300
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.build_image &&
+      (needs.gxde-rootfs.result == 'success' || inputs.rootfs_run_id != '')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
         with:
           path: project
           persist-credentials: false
-      - name: Fetch the GXDE root
-        uses: actions/download-artifact@v4
-        with:
-          name: gxde-rootfs-${{ github.sha }}
-          path: out/rootfs
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc             /opt/hostedtoolcache/CodeQL /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            qemu-user-static binfmt-support debootstrap mmdebstrap arch-test \
+            debian-archive-keyring zstd squashfs-tools cpio gdisk e2fsprogs \
+            file jq m4 alsa-utils acl attr \
+            build-essential bc bison flex libssl-dev libelf-dev libdrm-dev \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libc6-dev-arm64-cross \
+            python3-pyelftools
+          ls -l /proc/sys/fs/binfmt_misc/qemu-aarch64
       - name: Fetch the kernel build
+        if: inputs.kernel_run_id == ''
         uses: actions/download-artifact@v4
         with:
           name: gxde-kernel-${{ github.sha }}
-          path: out/kernel
+          path: out/kernel-dl
+      - name: Fetch the kernel build of an earlier run
+        if: inputs.kernel_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gxde-kernel-*
+          run-id: ${{ inputs.kernel_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: out/kernel-dl
+      - name: Lay out the kernel build
+        run: |
+          src=$(find out/kernel-dl -type d -path '*/project/out/kernel' | head -n 1)
+          test -n "$src"
+          mkdir -p out/kernel
+          cp -a "$src"/. out/kernel/
+          test -f out/kernel/arch/arm64/boot/Image
+      - name: Fetch the GXDE root
+        if: inputs.rootfs_run_id == ''
+        uses: actions/download-artifact@v4
+        with:
+          name: gxde-rootfs-${{ github.sha }}
+          path: out/rootfs-dl
+      - name: Fetch the GXDE root of an earlier run
+        if: inputs.rootfs_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gxde-rootfs-*
+          run-id: ${{ inputs.rootfs_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: out/rootfs-dl
       - name: Unpack the root
         run: |
-          sudo mkdir -p out/gxde/rootfs
-          sudo tar -I zstd -xf out/rootfs/rootfs.tar.zst -C out/gxde/rootfs
-          sudo test -x out/gxde/rootfs/usr/lib/systemd/systemd
+          archive=$(find out/rootfs-dl -name rootfs.tar.zst | head -n 1)
+          test -n "$archive"
+          mkdir -p out/gxde/root
+          sudo tar -I zstd -xf "$archive" -C out/gxde/root
+          sudo test -x out/gxde/root/usr/lib/systemd/systemd
+      - name: Read the locked kernel revision
+        id: kernel-ref
+        run: |
+          echo "sha=$(python3 -c 'import json;print(json.load(open("project/kernel/source.json"))["commit"])')" >>"$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
           repository: ${{ vars.LIUQIN_KERNEL_REPO || 'yzddmr6/linux-sm8450-liuqin' }}
-          ref: ${{ needs.kernel.outputs.sha }}
+          ref: ${{ steps.kernel-ref.outputs.sha }}
           path: linux-sm8450-liuqin
           fetch-depth: 0
           persist-credentials: false
-      - name: Assemble the bundle
+      - name: Download the fastboot ROM
         env:
-          GXDE_ROOT: ${{ github.workspace }}/out/gxde/rootfs
-          KERNEL_OUT: ${{ github.workspace }}/out/kernel
-          KERNEL_SOURCE: ${{ github.workspace }}/linux-sm8450-liuqin
-          LIUQIN_IMAGE_INPUTS: ${{ vars.LIUQIN_IMAGE_INPUTS || '/opt/liuqin/inputs.json' }}
-          OUT_DIR: ${{ github.workspace }}/out/gxde-image
+          ROM_URL: ${{ inputs.rom_url }}
         run: |
-          sudo -E project/tools/gxde/assemble-gxde-image.sh
-      - uses: actions/upload-artifact@v4
+          mkdir -p out/rom
+          curl -fL --retry 3 --retry-delay 5 --connect-timeout 30 \
+            -o out/rom/rom.tgz "$ROM_URL"
+          ls -l out/rom/rom.tgz
+      - name: Assemble the flashable bundle
+        env:
+          OUT_DIR: ${{ github.workspace }}/out/gxde
+          GXDE_ROOT: ${{ github.workspace }}/out/gxde/root
+          KERNEL_SOURCE: ${{ github.workspace }}/linux-sm8450-liuqin
+          KERNEL_OUT: ${{ github.workspace }}/out/kernel
+          ROM: ${{ github.workspace }}/out/rom/rom.tgz
+          JOBS: 8
+          STAGES: ${{ inputs.image_stages }}
+        run: |
+          # shellcheck disable=SC2086
+          sudo -E project/tools/gxde/build-gxde-image.sh $STAGES
+      - name: Upload the bundle
+        if: hashFiles('out/gxde/bundle/bundle.json') != ''
+        uses: actions/upload-artifact@v4
         with:
           name: gxde-bundle-${{ github.sha }}
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
-          path: out/gxde-image/bundle/
+          path: out/gxde/bundle/
+      - name: Upload the intermediate trees on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gxde-image-debug-${{ github.sha }}
+          if-no-files-found: ignore
+          compression-level: 1
+          retention-days: 3
+          path: |
+            out/gxde/stock/
+            out/gxde/wlan/
+            out/gxde/topology/
+            out/gxde/firmware-pool/
+            out/gxde/sensors/artifacts/
