@@ -88,27 +88,67 @@ def parse_geometry(data: bytes) -> dict:
 
 
 def parse_header(data: bytes, offset: int) -> dict:
-    magic, major, minor, header_size, checksum, tables_size, tables_checksum = struct.unpack_from(
-        "<IHHIIII", data, offset
-    )
+    """Parse the metadata header.
+
+    Two layouts are in the wild.  AOSP liblp stores a CRC32 header/tables pair
+    and puts the four table descriptors at +24.  Xiaomi's super images use the
+    same header magic but store SHA-256 digests (32 bytes each) and move the
+    descriptors to +80; the tables themselves are identical.
+    """
+    magic, major, minor, header_size = struct.unpack_from("<IHHI", data, offset)
     if magic != HEADER_MAGIC:
         die(f"metadata header magic mismatch at {offset}: 0x{magic:08x}")
-    zeroed = bytearray(data[offset:offset + header_size])
-    zeroed[12:16] = b"\0" * 4
-    verified = zlib.crc32(bytes(zeroed)) & 0xFFFFFFFF == checksum
-    tables = data[offset + header_size:offset + header_size + tables_size]
-    tables_verified = zlib.crc32(tables) & 0xFFFFFFFF == tables_checksum
-    descriptors = {}
-    for name, index in (("partitions", 0), ("extents", 1), ("groups", 2), ("block_devices", 3)):
-        base = offset + 24 + index * 12
-        descriptors[name] = struct.unpack_from("<III", data, base)
+
+    def descriptors(base: int) -> dict:
+        out = {}
+        for name, index in (("partitions", 0), ("extents", 1), ("groups", 2), ("block_devices", 3)):
+            out[name] = struct.unpack_from("<III", data, offset + base + index * 12)
+        return out
+
+    def plausible(table: dict) -> bool:
+        if table["partitions"][2] not in (48, 52):
+            return False
+        if table["extents"][2] not in (24, 32):
+            return False
+        if table["groups"][2] not in (48, 52):
+            return False
+        if table["block_devices"][2] not in (60, 64):
+            return False
+        return all(0 < count <= 8192 for _base, count, _size in table.values())
+
+    aosp = descriptors(24)
+    modern = descriptors(80)
+    if header_size >= 128 and plausible(modern):
+        layout = "metadata-sha256"
+        table = modern
+        tables_size = struct.unpack_from("<I", data, offset + 44)[0]
+        zeroed = bytearray(data[offset:offset + header_size])
+        zeroed[12:44] = b"\0" * 32
+        header_ok = hashlib.sha256(bytes(zeroed)).digest() == data[offset + 12:offset + 44]
+        tables = data[offset + header_size:offset + header_size + tables_size]
+        tables_ok = hashlib.sha256(tables).digest() == data[offset + 48:offset + 80]
+    elif plausible(aosp):
+        layout = "metadata-crc32"
+        table = aosp
+        header_checksum = struct.unpack_from("<I", data, offset + 12)[0]
+        tables_size = struct.unpack_from("<I", data, offset + 16)[0]
+        tables_checksum = struct.unpack_from("<I", data, offset + 20)[0]
+        zeroed = bytearray(data[offset:offset + header_size])
+        zeroed[12:16] = b"\0" * 4
+        header_ok = zlib.crc32(bytes(zeroed)) & 0xFFFFFFFF == header_checksum
+        tables = data[offset + header_size:offset + header_size + tables_size]
+        tables_ok = zlib.crc32(tables) & 0xFFFFFFFF == tables_checksum
+    else:
+        die("unrecognised logical-partition metadata layout")
+
     return {
         "version": f"{major}.{minor}",
+        "layout": layout,
         "header_size": header_size,
         "tables_size": tables_size,
-        "header_checksum_verified": verified,
-        "tables_checksum_verified": tables_verified,
-        "descriptors": descriptors,
+        "header_checksum_verified": header_ok,
+        "tables_checksum_verified": tables_ok,
+        "descriptors": table,
     }
 
 
@@ -117,7 +157,7 @@ def parse_tables(data: bytes, offset: int, header: dict) -> dict:
 
     def entries(name: str) -> list[tuple[int, int]]:
         table_offset, count, size = desc[name]
-        base = offset + table_offset
+        base = offset + header["header_size"] + table_offset
         return [(base + i * size, size) for i in range(count)]
 
     partitions = []
@@ -195,7 +235,8 @@ def partition_size(partition: dict, extents: list[dict]) -> int:
 
 def metadata_layout(data: bytes) -> dict:
     geometry = parse_geometry(data)
-    offset = GEOM_OFFSET + 4096
+    # [4096] primary geometry, [8192] backup geometry, [12288] metadata header.
+    offset = GEOM_OFFSET + 2 * 4096
     header = parse_header(data, offset)
     tables = parse_tables(data, offset, header)
     return {"geometry": geometry, "header": header, "tables": tables, "metadata_offset": offset}
@@ -504,6 +545,127 @@ def cmd_fstree(args: argparse.Namespace) -> int:
     return 0
 
 
+SENSOR_CONFIG_COUNT = 56
+SENSOR_CONFIG_MANIFEST_SHA256 = "1cbf79b3ba5bfdd3efa152bcb5900ff6addd703f61b19def59cea62ae3c56867"
+SNS_REG_CONFIG_SHA256 = "d89a5dfd69b9681f6864bca8d24c17fb922cb19a9ed3a0f7f5c00e4b5dc1089b"
+WLAN_INPUTS = {
+    "amss20.bin": "cc3e477fa698a28bdb8c8115a071893f9b2f5230de190ad525e74fd69bbb6092",
+    "m3.bin": "6938b4bba268a02659ee5e16992971aa0e2fab103a4f60cbccf65e4bd8ac9836",
+    "regdb.bin": "06810e85c94c8f412c4e72cb38546cac90db7fdbadd45aae00f977f862d38a7b",
+    "bd_m81gf.elf": "aa8ae92d781e09db8cffa960b00c9606e4bb65d9c7a89f9b32df1bd24aee8573",
+}
+
+
+def find_dir(root: str, predicate) -> str | None:
+    for base, dirs, files in os.walk(root):
+        if predicate(base, dirs, files):
+            return base
+    return None
+
+
+def find_file(root: str, name: str) -> str | None:
+    for base, _dirs, files in os.walk(root):
+        if name in files:
+            return os.path.join(base, name)
+    return None
+
+
+def sensor_dir_expectations(path: str) -> None:
+    config = os.path.join(path, "config")
+    names = sorted(n for n in os.listdir(config) if os.path.isfile(os.path.join(config, n)))
+    if len(names) != SENSOR_CONFIG_COUNT:
+        die(f"{config}: expected {SENSOR_CONFIG_COUNT} configs, found {len(names)}")
+    lines = []
+    for name in names:
+        digest = hashlib.sha256(open(os.path.join(config, name), "rb").read()).hexdigest()
+        lines.append(f"{digest}  {name}\n")
+    seen = hashlib.sha256("".join(lines).encode()).hexdigest()
+    if seen != SENSOR_CONFIG_MANIFEST_SHA256:
+        die(f"{config}: sensor config manifest is {seen}, expected {SENSOR_CONFIG_MANIFEST_SHA256}")
+    registry = os.path.join(path, "sns_reg_config")
+    if hashlib.sha256(open(registry, "rb").read()).hexdigest() != SNS_REG_CONFIG_SHA256:
+        die(f"{registry}: sensor registry does not match the pinned ROM")
+
+
+def wlan_dir_expectations(path: str) -> None:
+    for name, digest in WLAN_INPUTS.items():
+        candidate = os.path.join(path, name)
+        if not os.path.isfile(candidate):
+            die(f"{path}: missing stock WLAN input {name}")
+        if hashlib.sha256(open(candidate, "rb").read()).hexdigest() != digest:
+            die(f"{candidate}: stock WLAN input does not match the pinned ROM")
+
+
+def cmd_prepare(args: argparse.Namespace) -> int:
+    out = os.path.abspath(args.out)
+    work = os.path.join(out, "work")
+    os.makedirs(work, exist_ok=True)
+
+    if args.super:
+        super_image = os.path.abspath(args.super)
+        say(f"using the extracted super image {super_image}")
+    else:
+        say("reading the ROM archive")
+        found = unpack_rom(args.rom, work)
+        super_image = found.get("super.img")
+        if not super_image:
+            die("the ROM archive has no super.img")
+    if is_sparse(super_image):
+        say("expanding the sparse super image")
+        raw = os.path.join(work, "super.raw")
+        unsparse(super_image, raw)
+        super_image = raw
+
+    say("reading the logical partitions")
+    layout = metadata_layout(load_image(super_image, limit=1 << 22))
+    names = [p["name"] for p in layout["tables"]["partitions"]]
+    for slot in ("vendor_a", "vendor"):
+        if slot in names:
+            vendor_name = slot
+            break
+    else:
+        die(f"no vendor partition in the super image (have {', '.join(names)})")
+    vendor_image = os.path.join(work, f"{vendor_name}.img")
+    extract_partition(super_image, layout, next(p for p in layout["tables"]["partitions"] if p["name"] == vendor_name), vendor_image)
+    say(f"{vendor_name}: {os.path.getsize(vendor_image)} bytes")
+
+    say("extracting the exact-ROM sensor stack")
+    sensor_root = os.path.join(work, "raw-sensors")
+    fs_dump(vendor_image, "/etc/sensors", sensor_root)
+    sensors = find_dir(sensor_root, lambda base, dirs, files: "config" in dirs and "sns_reg_config" in files)
+    if not sensors:
+        die("vendor/etc/sensors/config was not found in the vendor partition")
+    sensor_dir_expectations(sensors)
+    dest = os.path.join(out, "rom-sensors", "etc", "sensors")
+    shutil.copytree(sensors, dest, dirs_exist_ok=True)
+    say(f"sensor stack: {dest}")
+
+    say("extracting the stock WLAN blobs")
+    wlan_root = os.path.join(work, "raw-wlan")
+    fs_dump(vendor_image, "/firmware_mnt/image/qca6490", wlan_root)
+    wlan_src = find_dir(wlan_root, lambda base, dirs, files: all(n in files for n in WLAN_INPUTS))
+    if not wlan_src:
+        die("vendor/firmware_mnt/image/qca6490 was not found in the vendor partition")
+    wlan_dir_expectations(wlan_src)
+    wlan_dest = os.path.join(out, "wlan-vendor")
+    os.makedirs(wlan_dest, exist_ok=True)
+    for name in WLAN_INPUTS:
+        shutil.copyfile(os.path.join(wlan_src, name), os.path.join(wlan_dest, name))
+    say(f"WLAN inputs: {wlan_dest}")
+
+    inputs = {
+        "rom": os.path.abspath(args.rom),
+        "vendor_partition": vendor_name,
+        "sensor_root": dest,
+        "wlan_vendor": wlan_dest,
+    }
+    with open(os.path.join(out, "inputs.json"), "w") as handle:
+        json.dump(inputs, handle, indent=2)
+        handle.write("\n")
+    print(json.dumps(inputs, indent=2))
+    return 0
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -534,6 +696,12 @@ def main(argv: list[str]) -> int:
     p.add_argument("rom")
     p.add_argument("--out", required=True)
     p.set_defaults(func=lambda a: print(json.dumps(unpack_rom(a.rom, a.out), indent=2)) and 0)
+
+    p = sub.add_parser("prepare", help="extract the stock device inputs from a ROM archive")
+    p.add_argument("rom", nargs="?")
+    p.add_argument("--super", help="use an already extracted super image instead of the archive")
+    p.add_argument("--out", required=True)
+    p.set_defaults(func=cmd_prepare)
 
     args = parser.parse_args(argv)
     return args.func(args)

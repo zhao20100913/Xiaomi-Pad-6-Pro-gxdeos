@@ -44,35 +44,14 @@ jobs:
             '*/images/super.img' '*/images/NON-HLOS.bin' '*/images/BTFM.bin' '*/images/dtbo.img'
           ls -l rom/ | tee report.txt
           file rom/* | tee -a report.txt
-      - name: Unpack super
+      - name: Prepare the stock inputs
         run: |
           set -x
-          python3 tools/gxde/prepare-stock-inputs.py unsparse rom/super.img super.raw
-          ls -l super.raw
-          python3 tools/gxde/prepare-stock-inputs.py probe super.raw | tee -a report.txt
-      - name: Dump the partitions
-        run: |
-          set -x
-          python3 tools/gxde/prepare-stock-inputs.py unpack super.raw parts vendor vendor_a 2>&1 | tee -a report.txt || true
-          for image in parts/*.img; do
-            echo "== $image ($(stat -c%s "$image") bytes)" | tee -a report.txt
-            if python3 tools/gxde/prepare-stock-inputs.py fs-tree "$image" / 2>&1 | head -40; then :; fi | tee -a report.txt
-          done
-      - name: Look for the device-layer files
-        run: |
-          set +e
-          vendor=$(ls parts/vendor_a.img parts/vendor.img 2>/dev/null | head -1)
-          echo "vendor image: $vendor" | tee -a report.txt
-          for path in /etc/sensors /firmware /firmware/novatek /firmware/qca /lib/firmware; do
-            echo "== vendor $path" | tee -a report.txt
-            python3 tools/gxde/prepare-stock-inputs.py fs-tree "$vendor" "$path" 2>&1 | head -30 | tee -a report.txt
-          done
-          for image in rom/NON-HLOS.bin rom/BTFM.bin; do
-            for path in / /image; do
-              echo "== $image $path" | tee -a report.txt
-              python3 tools/gxde/prepare-stock-inputs.py fs-tree "$image" "$path" 2>&1 | head -40 | tee -a report.txt
-            done
-          done
+          python3 tools/gxde/prepare-stock-inputs.py probe rom/super.img | tee -a report.txt || true
+          python3 tools/gxde/prepare-stock-inputs.py prepare --super rom/super.img --out stock 2>&1 | tee -a report.txt || true
+          find stock -type f -printf '%s  %p\n' | LC_ALL=C sort -k2 | tee -a report.txt | tail -40
+          sha256sum stock/rom-sensors/etc/sensors/sns_reg_config 2>/dev/null | tee -a report.txt || true
+          ls stock/rom-sensors/etc/sensors/config 2>/dev/null | wc -l | tee -a report.txt || true
       - name: Keep the metadata head
         run: |
           head -c 24576 super.raw > super.head.bin
@@ -87,3 +66,5 @@ jobs:
             report.txt
             super.head.bin
             super.sparse.head.bin
+            stock/rom-sensors
+            stock/wlan-vendor
