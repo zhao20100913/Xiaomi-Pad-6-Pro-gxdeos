@@ -26,7 +26,8 @@ stage=${1:-all}
 [ $# -eq 0 ] || shift
 out_dir=${OUT_DIR:-"$project_root/out/gxde-image"}
 case $out_dir in "$project_root"/out/*) ;; *) printf 'error: OUT_DIR must be below %s/out: %s\n' "$project_root" "$out_dir" >&2; exit 1 ;; esac
-out_dir=$(CDPATH= cd -- "$out_dir" 2>/dev/null && pwd || true)
+mkdir -p "$out_dir"
+out_dir=$(CDPATH= cd -- "$out_dir" && pwd)
 root=${GXDE_ROOT:-"$out_dir/root"}
 kernel_source=${KERNEL_SOURCE:-"$project_root/../linux-sm8450-liuqin"}
 kernel_out=${KERNEL_OUT:-"$project_root/out/kernel"}
