@@ -707,9 +707,10 @@ def cmd_prepare(args: argparse.Namespace) -> int:
 
     say("extracting the stock WLAN blobs")
     # The stock names (amss20.bin, m3.bin, regdb.bin, bd_m81gf.elf) do not
-    # survive into the vendor image under a predictable path, so identify the
-    # files by content: first across the vendor tree, then across the
-    # vendor_boot ramdisk fragments.
+    # survive into the vendor image under a predictable path.  They are also
+    # no longer required: device/firmware ships the processed WCN6855 set that
+    # tools/gxde/build-gxde-image.sh turns into the HSP2 tuple.  Try anyway,
+    # and carry on when they are absent.
     wanted = dict(WLAN_INPUTS)
     located: dict[str, str] = {}
 
@@ -730,7 +731,6 @@ def cmd_prepare(args: argparse.Namespace) -> int:
     scan_tree(vendor_tree)
     boot_image = os.path.join(work, "rom", "vendor_boot.img")
     if len(located) < len(WLAN_INPUTS) and os.path.exists(boot_image):
-        say("searching the vendor_boot ramdisk for the WLAN blobs")
         ramdisk_dir = os.path.join(work, "ramdisk-files")
         os.makedirs(ramdisk_dir, exist_ok=True)
         for part in vendor_ramdisks(boot_image, os.path.join(work, "vendor-boot")):
@@ -747,32 +747,24 @@ def cmd_prepare(args: argparse.Namespace) -> int:
                 with open(target, "wb") as handle:
                     handle.write(data)
                 located.setdefault(wanted[digest], target)
-                say(f"  {wanted[digest]} <- {os.path.basename(part)}:{name}")
 
-    missing = [name for name in WLAN_INPUTS if name not in located]
-    if missing:
-        detail = []
-        for hint in ("etc/wifi/qca6490", "firmware/wlan/qca_cld/qca6490", "firmware"):
-            candidate = os.path.join(vendor_tree, hint)
-            if os.path.isdir(candidate):
-                detail.append(f"{hint}: {', '.join(sorted(os.listdir(candidate))[:12])}")
-        die(
-            f"stock WLAN blobs missing from the vendor partition: {', '.join(missing)}\n"
-            + "\n".join(detail)
-        )
     wlan_dest = os.path.join(out, "wlan-vendor")
-    os.makedirs(wlan_dest, exist_ok=True)
-    for name, path in located.items():
-        shutil.copyfile(path, os.path.join(wlan_dest, name))
-        say(f"  {name} <- {path}")
-    wlan_dir_expectations(wlan_dest)
-    say(f"WLAN inputs: {wlan_dest}")
+    if len(located) == len(WLAN_INPUTS):
+        os.makedirs(wlan_dest, exist_ok=True)
+        for name, path in located.items():
+            shutil.copyfile(path, os.path.join(wlan_dest, name))
+            say(f"  {name} <- {path}")
+        wlan_dir_expectations(wlan_dest)
+        say(f"WLAN inputs: {wlan_dest}")
+    else:
+        missing = [name for name in WLAN_INPUTS if name not in located]
+        say(f"stock WLAN blobs absent ({', '.join(missing)}); using the tracked set")
 
     inputs = {
         "rom": os.path.abspath(args.rom),
         "vendor_partition": vendor_name,
         "sensor_root": dest,
-        "wlan_vendor": wlan_dest,
+        "wlan_vendor": wlan_dest if len(located) == len(WLAN_INPUTS) else None,
     }
     with open(os.path.join(out, "inputs.json"), "w") as handle:
         json.dump(inputs, handle, indent=2)
