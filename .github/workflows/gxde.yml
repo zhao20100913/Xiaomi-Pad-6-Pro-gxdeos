@@ -169,12 +169,13 @@ jobs:
           path: out/kernel-dl
       - name: Lay the kernel artifact out
         run: |
-          # The artifact keeps the workflow-relative paths (project/out/kernel/…).
-          src=$(find out/kernel-dl -type d -path '*/project/out/kernel' | head -n 1)
-          test -n "$src" || { echo 'kernel artifact has no project/out/kernel directory'; exit 1; }
+          # upload-artifact strips the least common ancestor (project/out/kernel),
+          # and a pattern download adds one directory per artifact.
+          src=out/kernel-dl
+          [ -d "$src/arch" ] || src=$(find out/kernel-dl -maxdepth 2 -type d -name 'gxde-kernel-*' | head -n 1)
+          test -f "$src/arch/arm64/boot/Image" || { echo 'no arm64 Image in the kernel artifact'; exit 1; }
           mkdir -p out/kernel
           cp -a "$src"/. out/kernel/
-          test -f out/kernel/arch/arm64/boot/Image
           test -f out/kernel/include/config/kernel.release
           ls out/kernel
       - name: Bootstrap Debian trixie arm64
@@ -300,11 +301,15 @@ jobs:
             echo 'the selected run has no gxde-kernel-* artifact (a run that reused its kernel has none)'
             exit 1
           }
-          src=$(find out/kernel-dl -type d -path '*/project/out/kernel' | head -n 1)
-          test -n "$src" || { echo 'artifact has no project/out/kernel directory'; exit 1; }
+          # upload-artifact strips the least common ancestor (project/out/kernel),
+          # and a pattern download adds one directory per artifact.
+          src=out/kernel-dl
+          [ -d "$src/arch" ] || src=$(find out/kernel-dl -maxdepth 2 -type d -name 'gxde-kernel-*' | head -n 1)
+          test -f "$src/arch/arm64/boot/Image" || { echo 'no arm64 Image in the kernel artifact'; exit 1; }
           mkdir -p out/kernel
           cp -a "$src"/. out/kernel/
-          test -f out/kernel/arch/arm64/boot/Image
+          test -f out/kernel/include/config/kernel.release
+          ls out/kernel
       - name: Fetch the GXDE root
         if: inputs.rootfs_run_id == ''
         uses: actions/download-artifact@v4
