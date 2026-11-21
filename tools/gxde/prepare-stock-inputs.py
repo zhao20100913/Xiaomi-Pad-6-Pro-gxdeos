@@ -656,14 +656,30 @@ def cmd_prepare(args: argparse.Namespace) -> int:
     say(f"sensor stack: {dest}")
 
     say("extracting the stock WLAN blobs")
-    wlan_src = find_dir(vendor_tree, lambda base, dirs, files: all(n in files for n in WLAN_INPUTS))
-    if not wlan_src:
-        die("vendor/firmware_mnt/image/qca6490 was not found in the vendor partition")
-    wlan_dir_expectations(wlan_src)
+    # The four blobs are not guaranteed to share one directory in the vendor
+    # image, so collect them by name from the whole tree.
+    located: dict[str, str] = {}
+    for base, _dirs, files in os.walk(vendor_tree):
+        for name in WLAN_INPUTS:
+            if name in files:
+                located.setdefault(name, os.path.join(base, name))
+    missing = [name for name in WLAN_INPUTS if name not in located]
+    if missing:
+        roots = sorted({
+            os.path.relpath(base, vendor_tree)
+            for base, _dirs, _files in os.walk(vendor_tree)
+            if os.path.basename(base).lower().startswith(("qca", "firmware"))
+        })
+        die(
+            f"stock WLAN blobs missing from the vendor partition: {', '.join(missing)}\n"
+            f"candidates: {', '.join(roots[:40])}"
+        )
     wlan_dest = os.path.join(out, "wlan-vendor")
     os.makedirs(wlan_dest, exist_ok=True)
-    for name in WLAN_INPUTS:
-        shutil.copyfile(os.path.join(wlan_src, name), os.path.join(wlan_dest, name))
+    for name, path in located.items():
+        shutil.copyfile(path, os.path.join(wlan_dest, name))
+        say(f"  {name} <- {os.path.relpath(path, vendor_tree)}")
+    wlan_dir_expectations(wlan_dest)
     say(f"WLAN inputs: {wlan_dest}")
 
     inputs = {
