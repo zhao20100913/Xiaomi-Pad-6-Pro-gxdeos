@@ -361,7 +361,7 @@ jobs:
           STAGES: ${{ inputs.image_stages }}
         run: |
           # shellcheck disable=SC2086
-          sudo -E project/tools/gxde/build-gxde-image.sh $STAGES
+          sudo -E sh project/tools/gxde/build-gxde-image.sh $STAGES
       - name: Upload the bundle
         if: hashFiles('project/out/gxde/bundle/bundle.json') != ''
         uses: actions/upload-artifact@v4
