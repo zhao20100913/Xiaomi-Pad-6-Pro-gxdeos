@@ -296,8 +296,12 @@ jobs:
           path: out/kernel-dl
       - name: Lay out the kernel build
         run: |
+          test -d out/kernel-dl || {
+            echo 'the selected run has no gxde-kernel-* artifact (a run that reused its kernel has none)'
+            exit 1
+          }
           src=$(find out/kernel-dl -type d -path '*/project/out/kernel' | head -n 1)
-          test -n "$src"
+          test -n "$src" || { echo 'artifact has no project/out/kernel directory'; exit 1; }
           mkdir -p out/kernel
           cp -a "$src"/. out/kernel/
           test -f out/kernel/arch/arm64/boot/Image
