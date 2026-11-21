@@ -1,0 +1,89 @@
+name: Stock ROM probe
+# Development probe: download the liuqin fastboot ROM and report what is inside
+# it, so the GXDE image pipeline can be written against the real layout instead
+# of guesses.  It only inspects; it never builds anything.
+#
+# Delete this workflow once tools/gxde/prepare-stock-inputs.py handles the ROM
+# unaided.
+on:
+  workflow_dispatch:
+    inputs:
+      rom_url:
+        description: Fastboot ROM URL
+        required: false
+        default: https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS2.0.6.0.VMYCNXM/liuqin_images_OS2.0.6.0.VMYCNXM_20250318.0000.00_15.0_cn_c29f6de5df.tgz
+permissions:
+  contents: read
+concurrency:
+  group: stock-probe
+  cancel-in-progress: true
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            android-sdk-libsparse-utils e2fsprogs erofs-utils file jq
+          df -h /
+      - name: Download the ROM
+        env:
+          ROM_URL: ${{ inputs.rom_url }}
+        run: |
+          set -x
+          curl -fL --retry 3 --retry-delay 5 --connect-timeout 30 -o rom.tgz "$ROM_URL"
+          ls -l rom.tgz
+          df -h /
+      - name: List the archive
+        run: |
+          tar tzvf rom.tgz > archive.txt 2>&1 || true
+          wc -l archive.txt
+          grep -E 'images/|\.img$' archive.txt | head -80 | tee report.txt
+          echo '--- top level ---' | tee -a report.txt
+          awk '{print $6}' archive.txt | cut -d/ -f1 | sort -u | head -20 | tee -a report.txt
+      - name: Extract super and dtbo
+        run: |
+          tar xzvf rom.tgz --wildcards 'images/super.img' 'images/dtbo.img' 'images/vendor_boot.img' 2>&1 | tail -5 || true
+          ls -l images/ 2>/dev/null | tee -a report.txt
+          file images/*.img 2>/dev/null | tee -a report.txt
+      - name: Unsparse super
+        run: |
+          if file images/super.img | grep -qi sparse; then
+            simg2img images/super.img super.raw
+          else
+            cp images/super.img super.raw
+          fi
+          ls -l super.raw | tee -a report.txt
+          python3 - <<'PY'
+          import struct
+          data = open('super.raw', 'rb').read(4096 * 3)
+          geom = data[4096:4096 + 32]
+          magic, struct_size, checksum, meta_max, slot_count, block_size = struct.unpack('<IIIIII', geom[:24])
+          print(f'super.raw: {len(data)} bytes read')
+          print(f'geometry magic=0x{magic:08x} struct_size={struct_size} meta_max={meta_max} slots={slot_count} block={block_size}')
+          PY
+      - name: Keep the heads for inspection
+        run: |
+          head -c 24576 super.raw > super.head.bin
+          head -c 24576 images/super.img > super.img.head.bin 2>/dev/null || true
+          ls -l super.head.bin super.img.head.bin 2>/dev/null
+          df -h /
+      - name: Report
+        run: cat report.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stock-probe-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 3
+          path: |
+            report.txt
+            archive.txt
+            super.head.bin
+            super.img.head.bin
