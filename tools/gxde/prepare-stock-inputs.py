@@ -656,23 +656,35 @@ def cmd_prepare(args: argparse.Namespace) -> int:
     say(f"sensor stack: {dest}")
 
     say("extracting the stock WLAN blobs")
-    # The four blobs are not guaranteed to share one directory in the vendor
-    # image, so collect them by name from the whole tree.
+    # The stock names (amss20.bin, m3.bin, regdb.bin, bd_m81gf.elf) do not
+    # survive into the vendor image under a predictable path, so identify the
+    # files by content instead of by name.
+    wanted = dict(WLAN_INPUTS)
     located: dict[str, str] = {}
     for base, _dirs, files in os.walk(vendor_tree):
-        for name in WLAN_INPUTS:
-            if name in files:
-                located.setdefault(name, os.path.join(base, name))
+        for name in files:
+            path = os.path.join(base, name)
+            try:
+                if os.path.getsize(path) > 64 << 20:
+                    continue
+                with open(path, "rb") as handle:
+                    digest = hashlib.sha256(handle.read()).hexdigest()
+            except OSError:
+                continue
+            if digest in wanted:
+                located[wanted[digest]] = path
     missing = [name for name in WLAN_INPUTS if name not in located]
     if missing:
-        roots = sorted({
-            os.path.relpath(base, vendor_tree)
-            for base, _dirs, _files in os.walk(vendor_tree)
-            if os.path.basename(base).lower().startswith(("qca", "firmware"))
-        })
+        detail = []
+        for hint in ("etc/wifi/qca6490", "firmware/wlan/qca_cld/qca6490",
+                     "firmware_mnt", "firmware"):
+            candidate = os.path.join(vendor_tree, hint)
+            if os.path.isdir(candidate):
+                entries = sorted(os.listdir(candidate))[:12]
+                detail.append(f"{hint}: {', '.join(entries) or '(empty)'}")
         die(
             f"stock WLAN blobs missing from the vendor partition: {', '.join(missing)}\n"
-            f"candidates: {', '.join(roots[:40])}"
+            + "\n".join(detail)
         )
     wlan_dest = os.path.join(out, "wlan-vendor")
     os.makedirs(wlan_dest, exist_ok=True)
