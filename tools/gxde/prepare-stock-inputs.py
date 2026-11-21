@@ -20,6 +20,7 @@ Nothing here needs root, mount(2) or any third-party Python package.
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import os
@@ -511,7 +512,7 @@ def unpack_rom(rom: str, work: str) -> dict[str, str]:
     for member in members:
         say(f"  {member.name}  {member.size}")
     images = os.path.join(work, "rom")
-    found = rom_extract(rom, ["super.img", "NON-HLOS.bin", "BTFM.bin"], images)
+    found = rom_extract(rom, ["super.img", "NON-HLOS.bin", "BTFM.bin", "vendor_boot.img"], images)
     return found
 
 
@@ -567,6 +568,55 @@ WLAN_INPUTS = {
     "regdb.bin": "06810e85c94c8f412c4e72cb38546cac90db7fdbadd45aae00f977f862d38a7b",
     "bd_m81gf.elf": "aa8ae92d781e09db8cffa960b00c9606e4bb65d9c7a89f9b32df1bd24aee8573",
 }
+
+
+def aosp_unpack_bootimg() -> str:
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script = os.path.join(root, "local", "aosp-mkbootimg", "unpack_bootimg.py")
+    if not os.path.exists(script):
+        die(f"{script} is missing; run tools/fetch-aosp-mkbootimg.sh first")
+    return script
+
+
+def vendor_ramdisks(boot_image: str, out_dir: str) -> list[str]:
+    os.makedirs(out_dir, exist_ok=True)
+    subprocess.run(
+        [sys.executable, aosp_unpack_bootimg(), "--boot_img", boot_image, "--out", out_dir],
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+    return [
+        os.path.join(out_dir, name)
+        for name in sorted(os.listdir(out_dir))
+        if name.startswith("vendor_ramdisk")
+    ]
+
+
+def cpio_files(blob: bytes) -> dict[str, bytes]:
+    if blob[:2] == b"\x1f\x8b":
+        blob = gzip.decompress(blob)
+    files: dict[str, bytes] = {}
+    pos = 0
+    while pos + 110 <= len(blob):
+        header = blob[pos : pos + 110]
+        if header[:6] not in (b"070701", b"070702"):
+            break
+        try:
+            fields = [int(header[6 + 8 * i : 14 + 8 * i], 16) for i in range(13)]
+        except ValueError:
+            break
+        size, namesize = fields[6], fields[11]
+        name_start = pos + 110
+        name = blob[name_start : name_start + namesize - 1].decode("utf-8", "replace")
+        data_start = name_start + namesize
+        data_start += (-data_start) % 4
+        if name == "TRAILER!!!":
+            break
+        if size and not name.endswith("/"):
+            files[name.lstrip("./")] = blob[data_start : data_start + size]
+        pos = data_start + size
+        pos += (-pos) % 4
+    return files
 
 
 def find_dir(root: str, predicate) -> str | None:
@@ -658,30 +708,54 @@ def cmd_prepare(args: argparse.Namespace) -> int:
     say("extracting the stock WLAN blobs")
     # The stock names (amss20.bin, m3.bin, regdb.bin, bd_m81gf.elf) do not
     # survive into the vendor image under a predictable path, so identify the
-    # files by content instead of by name.
+    # files by content: first across the vendor tree, then across the
+    # vendor_boot ramdisk fragments.
     wanted = dict(WLAN_INPUTS)
     located: dict[str, str] = {}
-    for base, _dirs, files in os.walk(vendor_tree):
-        for name in files:
-            path = os.path.join(base, name)
-            try:
-                if os.path.getsize(path) > 64 << 20:
+
+    def scan_tree(root: str) -> None:
+        for base, _dirs, files in os.walk(root):
+            for name in files:
+                path = os.path.join(base, name)
+                try:
+                    if os.path.getsize(path) > 64 << 20:
+                        continue
+                    with open(path, "rb") as handle:
+                        digest = hashlib.sha256(handle.read()).hexdigest()
+                except OSError:
                     continue
-                with open(path, "rb") as handle:
-                    digest = hashlib.sha256(handle.read()).hexdigest()
-            except OSError:
+                if digest in wanted and wanted[digest] not in located:
+                    located[wanted[digest]] = path
+
+    scan_tree(vendor_tree)
+    boot_image = os.path.join(work, "rom", "vendor_boot.img")
+    if len(located) < len(WLAN_INPUTS) and os.path.exists(boot_image):
+        say("searching the vendor_boot ramdisk for the WLAN blobs")
+        ramdisk_dir = os.path.join(work, "ramdisk-files")
+        os.makedirs(ramdisk_dir, exist_ok=True)
+        for part in vendor_ramdisks(boot_image, os.path.join(work, "vendor-boot")):
+            try:
+                entries = cpio_files(open(part, "rb").read())
+            except Exception as error:  # noqa: BLE001 - diagnostics only
+                say(f"  {os.path.basename(part)}: {error}")
                 continue
-            if digest in wanted:
-                located[wanted[digest]] = path
+            for name, data in entries.items():
+                digest = hashlib.sha256(data).hexdigest()
+                if digest not in wanted:
+                    continue
+                target = os.path.join(ramdisk_dir, wanted[digest])
+                with open(target, "wb") as handle:
+                    handle.write(data)
+                located.setdefault(wanted[digest], target)
+                say(f"  {wanted[digest]} <- {os.path.basename(part)}:{name}")
+
     missing = [name for name in WLAN_INPUTS if name not in located]
     if missing:
         detail = []
-        for hint in ("etc/wifi/qca6490", "firmware/wlan/qca_cld/qca6490",
-                     "firmware_mnt", "firmware"):
+        for hint in ("etc/wifi/qca6490", "firmware/wlan/qca_cld/qca6490", "firmware"):
             candidate = os.path.join(vendor_tree, hint)
             if os.path.isdir(candidate):
-                entries = sorted(os.listdir(candidate))[:12]
-                detail.append(f"{hint}: {', '.join(entries) or '(empty)'}")
+                detail.append(f"{hint}: {', '.join(sorted(os.listdir(candidate))[:12])}")
         die(
             f"stock WLAN blobs missing from the vendor partition: {', '.join(missing)}\n"
             + "\n".join(detail)
@@ -690,7 +764,7 @@ def cmd_prepare(args: argparse.Namespace) -> int:
     os.makedirs(wlan_dest, exist_ok=True)
     for name, path in located.items():
         shutil.copyfile(path, os.path.join(wlan_dest, name))
-        say(f"  {name} <- {os.path.relpath(path, vendor_tree)}")
+        say(f"  {name} <- {path}")
     wlan_dir_expectations(wlan_dest)
     say(f"WLAN inputs: {wlan_dest}")
 
