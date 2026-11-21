@@ -14,14 +14,22 @@ unpack_sha256=06b54dd9a07c5281778e29e234e76f6e3faee8bf0c904a5ef88fdee30eeed12e
 
 mkdir -p "$download_dir" "$extract_dir"
 
-if [ ! -f "$download_dir/$archive" ] || \
-	! echo "$archive_sha256  $download_dir/$archive" | sha256sum --check --status; then
+if [ ! -f "$download_dir/$archive" ]; then
 	curl --fail --location "$url" --output "$download_dir/$archive.part"
 	mv "$download_dir/$archive.part" "$download_dir/$archive"
 fi
 
-echo "$archive_sha256  $download_dir/$archive" | sha256sum --check
-tar -xzf "$download_dir/$archive" -C "$extract_dir"
+# googlesource generates the archive per request and its gzip framing (and with
+# it the tarball hash) is not stable, so the archive hash is informational only.
+# The two scripts that are actually used are pinned by content instead.
+# archive: $archive_sha256
+if ! { echo "$mkbootimg_sha256  $extract_dir/mkbootimg.py"
+	echo "$unpack_sha256  $extract_dir/unpack_bootimg.py"; } |
+	sha256sum --check --status; then
+	rm -rf "$extract_dir"
+	mkdir -p "$extract_dir"
+	tar -xzf "$download_dir/$archive" -C "$extract_dir"
+fi
 echo "$mkbootimg_sha256  $extract_dir/mkbootimg.py" | sha256sum --check
 echo "$unpack_sha256  $extract_dir/unpack_bootimg.py" | sha256sum --check
 
