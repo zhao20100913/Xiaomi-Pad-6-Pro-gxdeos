@@ -354,9 +354,10 @@ jobs:
         with:
           path: |
             project/out/gxde/stock/rom-sensors
-            project/out/gxde/sensors
+            project/out/gxde/sensors/artifacts
+            project/tools/local/sensor-stack-src
           # Bump the version when the sensor builder or the stock extractor changes.
-          key: gxde-stock-sensors-v1
+          key: gxde-stock-sensors-v2
 
       - name: Download the fastboot ROM
         env:
