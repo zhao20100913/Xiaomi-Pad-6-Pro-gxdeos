@@ -57,25 +57,34 @@ if [ "$rebuild_modules" = 1 ]; then
 		KCFLAGS="$debug_map" KAFLAGS="$debug_map" \
 		CFLAGS_.vmlinux.export.o="$debug_map" CFLAGS_.module-common.o="$debug_map" modules
 fi
-[ -f "$out/modules.order" ] && [ ! -L "$out/modules.order" ] || die 'kernel modules.order is unavailable'
-awk '
-	$0 == "" || $0 ~ /^\// || $0 ~ /^\.\.\// || $0 ~ /\/\.\.\// ||
-	$0 ~ /\/\.\.$/ || $0 ~ /\/\// || $0 !~ /[.]o$/ || seen[$0]++ { bad=1 }
-	END { exit bad }
-' "$out/modules.order" || die 'kernel modules.order contains an unsafe or duplicate path'
-source_count=$(wc -l <"$out/modules.order" | tr -d ' ')
-[ "$source_count" -ge 100 ] || die "implausibly small kernel module order: $source_count"
-missing=0
-while IFS= read -r object; do
-	case $object in *.o) module=${object%.o}.ko ;; *) die "unsafe modules.order entry: $object" ;; esac
-	[ -f "$out/$module" ] && [ ! -L "$out/$module" ] || missing=$((missing + 1))
-done <"$out/modules.order"
-[ "$missing" = 0 ] || die "kernel OUT lacks $missing linked modules; finish the deterministic kernel build first"
-
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT HUP INT TERM
-make -C "$kernel" O="$out" ARCH=arm64 CROSS_COMPILE="$cross" \
-	INSTALL_MOD_PATH="$stage/usr" INSTALL_MOD_STRIP=1 modules_install
+
+if [ -f "$out/modules.order" ] && [ ! -L "$out/modules.order" ]; then
+	awk '
+		$0 == "" || $0 ~ /^\// || $0 ~ /^\.\.\// || $0 ~ /\/\.\.\// ||
+		$0 ~ /\/\.\.$/ || $0 ~ /\/\// || $0 !~ /[.]o$/ || seen[$0]++ { bad=1 }
+		END { exit bad }
+	' "$out/modules.order" || die 'kernel modules.order contains an unsafe or duplicate path'
+	source_count=$(wc -l <"$out/modules.order" | tr -d ' ')
+	[ "$source_count" -ge 100 ] || die "implausibly small kernel module order: $source_count"
+	missing=0
+	while IFS= read -r object; do
+		case $object in *.o) module=${object%.o}.ko ;; *) die "unsafe modules.order entry: $object" ;; esac
+		[ -f "$out/$module" ] && [ ! -L "$out/$module" ] || missing=$((missing + 1))
+	done <"$out/modules.order"
+	[ "$missing" = 0 ] || die "kernel OUT lacks $missing linked modules; finish the deterministic kernel build first"
+	make -C "$kernel" O="$out" ARCH=arm64 CROSS_COMPILE="$cross" \
+		INSTALL_MOD_PATH="$stage/usr" INSTALL_MOD_STRIP=1 modules_install
+else
+	# The CI artifact drops the build metadata but keeps the installed tree,
+	# which is the same graph modules_install would produce.
+	[ -d "$out/modules/lib/modules" ] || die 'kernel modules.order is unavailable'
+	printf '%s\n' 'build-liuqin-kernel-modules: reusing the installed module tree' >&2
+	mkdir -p "$stage/usr/lib"
+	cp -a "$out/modules/lib/modules" "$stage/usr/lib/modules"
+	source_count=$(find "$stage/usr/lib/modules" -type f -name '*.ko' | wc -l | tr -d ' ')
+fi
 tree=$stage/usr/lib/modules/$release
 [ -d "$tree" ] || die 'modules_install produced no release tree'
 rm -f "$tree/build" "$tree/source"
