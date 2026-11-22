@@ -350,6 +350,7 @@ choose_session() {
 
 stage_assemble() {
 	need_root
+	mkdir -p "$out_dir/inputs"
 	[ -x "$root/usr/bin/apt-get" ] || die 'run the bootstrap stage first'
 	# --- overlay (files only, never ownership or setuid surprises) -----------
 	if [ -d "$overlay" ]; then
