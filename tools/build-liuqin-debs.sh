@@ -48,7 +48,9 @@ power_key_cc=${POWER_KEY_CC:-$(command -v aarch64-linux-gnu-gcc || true)}
 power_keyd_source=${POWER_KEYD_SOURCE:-"$project_root/device/power-key/liuqin-power-keyd.c"}
 uinput_automation_source=${UINPUT_AUTOMATION_SOURCE:-"$project_root/device/input/liuqin-uinput-automation.c"}
 audio_probe_source=${AUDIO_PROBE_SOURCE:-"$project_root/device/audio-topology/liuqin-audio-hwparams-probe.c"}
-power_settings_binary=${POWER_SETTINGS_BINARY:-"$project_root/out/gnome-control-center/gnome-control-center"}
+# An empty POWER_SETTINGS_BINARY means "this distribution has no Ubuntu-built
+# Settings package"; `-` rather than `:-` keeps that empty on purpose.
+power_settings_binary=${POWER_SETTINGS_BINARY-"$project_root/out/gnome-control-center/gnome-control-center"}
 # A distro without Ubuntu's Settings package (e.g. the Debian/GXDE port) can
 # replace the dependency string; the default keeps the Ubuntu 26.04 contract.
 device_support_deps=${LIUQIN_DEVICE_SUPPORT_DEPS:-'libasound2t64 (>= 1.2), gnome-control-center (>= 1:50.0), python3-gi, python3-pyudev, init-system-helpers'}
