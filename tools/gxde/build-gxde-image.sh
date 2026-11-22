@@ -96,6 +96,10 @@ stage_topology() {
 }
 
 stage_sensors() {
+	if [ -f "$out_dir/sensors/artifacts/sensor-stack.tar" ]; then
+		say "reusing the sensor stack: $out_dir/sensors"
+		return
+	fi
 	say 'building the SSC userspace (arm64 chroot)'
 	need_root
 	[ -f "$out_dir/stock/rom-sensors/etc/sensors/sns_reg_config" ] ||
