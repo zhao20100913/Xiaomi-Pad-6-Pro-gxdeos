@@ -161,9 +161,12 @@ stage_debs() {
 stage_device() {
 	say 'installing the device layer and writing the boot contract'
 	need_root
-	OUT_DIR="$out_dir" GXDE_ROOT="$root" GXDE_ALLOW_FOREIGN_ROOT=1 \
-	DEVICE_DEBS_DIR="$out_dir/debs" KERNEL_MODULES_DIR="$kernel_out/modules" \
-		sh "$project_root/tools/gxde/build-gxde-rootfs.sh" device assemble manifest
+	# build-gxde-rootfs.sh consumes one stage per call.
+	for step in device assemble manifest; do
+		OUT_DIR="$out_dir" GXDE_ROOT="$root" GXDE_ALLOW_FOREIGN_ROOT=1 \
+		DEVICE_DEBS_DIR="$out_dir/debs" KERNEL_MODULES_DIR="$kernel_out/modules" \
+			sh "$project_root/tools/gxde/build-gxde-rootfs.sh" "$step" || exit 1
+	done
 	# The boot contract pins /usr/share/liuqin/kernel.release to the kernel that
 	# produced the modules, so refuse a device layer built against another one.
 	have=$(cat "$root/usr/share/liuqin/kernel.release")
