@@ -87,7 +87,7 @@ else
 fi
 tree=$stage/usr/lib/modules/$release
 [ -d "$tree" ] || die 'modules_install produced no release tree'
-rm -f "$tree/build" "$tree/source"
+rm -rf "$tree/build" "$tree/source"
 /usr/sbin/depmod -b "$stage/usr" "$release"
 # The pre-strip objects contain their OUT_DIR in debug metadata. GNU ld hashes
 # that metadata into .note.gnu.build-id, then modules_install strips the debug
