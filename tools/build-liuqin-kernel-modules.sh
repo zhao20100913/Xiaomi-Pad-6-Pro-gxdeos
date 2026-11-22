@@ -18,7 +18,13 @@ canonical_prefix=${KBUILD_CANONICAL_PREFIX:-}
 
 die() { echo "build-liuqin-kernel-modules: $*" >&2; exit 1; }
 case $dest in "$project"/out/*|/tmp/*) ;; *) die 'OUT_DIR must be below out/ or /tmp' ;; esac
-[ -f "$out/.config" ] || die 'kernel output config is unavailable'
+# The GitHub artifact upload drops dotfiles, so a CI-restored kernel output has
+# no .config; include/config/auto.conf carries the same selected symbols and is
+# what the module graph was actually built from.
+if [ ! -f "$out/.config" ]; then
+	[ -f "$out/include/config/auto.conf" ] ||
+		die 'kernel output config is unavailable'
+fi
 [ -f "$out/arch/arm64/boot/Image" ] || die 'matching Image is unavailable'
 command -v "$objcopy" >/dev/null || die "objcopy is unavailable: $objcopy"
 
