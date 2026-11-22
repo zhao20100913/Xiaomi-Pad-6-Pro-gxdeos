@@ -355,7 +355,8 @@ jobs:
           path: |
             project/out/gxde/stock/rom-sensors
             project/out/gxde/sensors
-          key: gxde-stock-sensors-${{ hashFiles('tools/build-liuqin-sensors-stack.sh', 'tools/gxde/prepare-stock-inputs.py', 'device/sensors-overlay/**') }}
+          # Bump the version when the sensor builder or the stock extractor changes.
+          key: gxde-stock-sensors-v1
 
       - name: Download the fastboot ROM
         env:
