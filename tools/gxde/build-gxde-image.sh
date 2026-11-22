@@ -147,6 +147,8 @@ stage_debs() {
 	OUT_DIR="$out_dir/debs" \
 	UBUNTU_DESKTOP_ROOT="$root" \
 	KERNEL_MODULES_DIR="$out_dir/modules" \
+	KERNEL_IMAGE="$kernel_out/arch/arm64/boot/Image" \
+	KERNEL_DTB="$kernel_out/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dtb" \
 	FIRMWARE_TREE="${FIRMWARE_TREE:-$project_root/device/firmware}" \
 	SENSOR_STACK_TAR="$sensor_tar" \
 	SENSOR_STACK_SHA256=$(sha256sum "$sensor_tar" | cut -d' ' -f1) \
