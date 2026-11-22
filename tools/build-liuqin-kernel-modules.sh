@@ -83,7 +83,9 @@ else
 	printf '%s\n' 'build-liuqin-kernel-modules: reusing the installed module tree' >&2
 	mkdir -p "$stage/usr/lib"
 	cp -a "$out/modules/lib/modules" "$stage/usr/lib/modules"
-	source_count=$(find "$stage/usr/lib/modules/$release" -type f -name '*.ko' | wc -l | tr -d ' ')
+	# The installed tree's build/ and source/ entries are full build trees in
+	# the CI artifact, so count only after they are dropped below.
+	source_count=
 fi
 tree=$stage/usr/lib/modules/$release
 [ -d "$tree" ] || die 'modules_install produced no release tree'
@@ -101,6 +103,7 @@ find "$tree" -type f -name '*.ko' -exec \
 find "$stage/usr/lib/modules" -type d -exec chmod 0755 {} +
 find "$stage/usr/lib/modules" -type f -exec chmod 0644 {} +
 count=$(find "$tree" -type f -name '*.ko' | wc -l | tr -d ' ')
+[ -n "$source_count" ] || source_count=$count
 [ "$count" = "$source_count" ] ||
 	die "installed module count differs from source order: $count != $source_count"
 
