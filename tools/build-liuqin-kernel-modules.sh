@@ -83,7 +83,7 @@ else
 	printf '%s\n' 'build-liuqin-kernel-modules: reusing the installed module tree' >&2
 	mkdir -p "$stage/usr/lib"
 	cp -a "$out/modules/lib/modules" "$stage/usr/lib/modules"
-	source_count=$(find "$stage/usr/lib/modules" -type f -name '*.ko' | wc -l | tr -d ' ')
+	source_count=$(find "$stage/usr/lib/modules/$release" -type f -name '*.ko' | wc -l | tr -d ' ')
 fi
 tree=$stage/usr/lib/modules/$release
 [ -d "$tree" ] || die 'modules_install produced no release tree'
