@@ -21,8 +21,10 @@ case $dest in "$project"/out/*|/tmp/*) ;; *) die 'OUT_DIR must be below out/ or 
 # The GitHub artifact upload drops dotfiles, so a CI-restored kernel output has
 # no .config; include/config/auto.conf carries the same selected symbols and is
 # what the module graph was actually built from.
-if [ ! -f "$out/.config" ]; then
-	[ -f "$out/include/config/auto.conf" ] ||
+if [ ! -f "$out/.config" ] && [ ! -f "$out/include/config/auto.conf" ]; then
+	# Neither the config nor the generated symbol list survived the artifact
+	# round trip; the module tree itself is the graph being packaged.
+	[ -d "$out/modules/lib/modules" ] ||
 		die 'kernel output config is unavailable'
 fi
 [ -f "$out/arch/arm64/boot/Image" ] || die 'matching Image is unavailable'
