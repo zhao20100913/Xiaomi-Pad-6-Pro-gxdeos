@@ -349,6 +349,14 @@ jobs:
           git fetch -q --depth=1 origin "$sha"
           git checkout -q --detach FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$sha"
+      - name: Cache the stock inputs and the sensor stack
+        uses: actions/cache@v4
+        with:
+          path: |
+            project/out/gxde/stock/rom-sensors
+            project/out/gxde/sensors
+          key: gxde-stock-sensors-${{ hashFiles('tools/build-liuqin-sensors-stack.sh', 'tools/gxde/prepare-stock-inputs.py', 'device/sensors-overlay/**') }}
+
       - name: Download the fastboot ROM
         env:
           ROM_URL: ${{ inputs.rom_url }}
