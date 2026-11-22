@@ -105,7 +105,14 @@ while IFS="$(printf '\t')" read -r component version repository commit tree; do
 	dir=$source_cache/$component
 	if [ ! -d "$dir/.git" ]; then
 		say "fetching $component $version"
-		git clone --filter=blob:none --no-checkout "$repository" "$dir"
+		attempt=1
+		while :; do
+			git clone --filter=blob:none --no-checkout "$repository" "$dir" && break
+			rm -rf "$dir"
+			[ "$attempt" -lt 3 ] || die "cannot fetch $component after three attempts"
+			attempt=$((attempt + 1))
+			sleep $((attempt * 20))
+		done
 	fi
 	[ "$(git -C "$dir" remote get-url origin)" = "$repository" ] ||
 		die "$component origin differs from the pinned repository"
