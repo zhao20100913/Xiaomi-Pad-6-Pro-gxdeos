@@ -118,6 +118,7 @@ jobs:
         with:
           name: gxde-kernel-${{ github.sha }}
           if-no-files-found: error
+          include-hidden-files: true
           compression-level: 1
           retention-days: 7
           path: |
