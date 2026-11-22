@@ -263,7 +263,9 @@ stage_device() {
 		say "installing the liuqin device layer from $device_debs_dir"
 		mkdir -p "$root/tmp/liuqin-debs"
 		cp "$@" "$root/tmp/liuqin-debs/"
-		in_root /bin/sh -c 'cd /tmp/liuqin-debs && apt-get install -y --allow-downgrades ./*.deb' ||
+		# The distro ships generic firmware-atheros/qcom blobs at the same paths;
+		# the device package is the authority on a liuqin image.
+		in_root /bin/sh -c 'cd /tmp/liuqin-debs && apt-get install -y --allow-downgrades -o Dpkg::Options::=--force-overwrite ./*.deb' ||
 			die 'the liuqin device layer did not install'
 		rm -rf "$root/tmp/liuqin-debs"
 		[ -f "$root/usr/share/liuqin/kernel.release" ] ||
