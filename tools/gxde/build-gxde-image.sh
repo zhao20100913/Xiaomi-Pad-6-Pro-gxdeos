@@ -203,6 +203,21 @@ stage_boot() {
 	[ "$overlay_count" -eq 44 ] || die "expected 44 stock DTBO entries in $overlay_dir, found $overlay_count"
 	[ "$base_count" -eq 14 ] || die "expected 14 stock base DTBs in $base_dir, found $base_count"
 	say "ABL overlay sink: $overlay_count DTBO entries, $base_count base DTBs"
+	# build-installer-runtime.py copies tar, install, mkfs.ext4, e2fsck,
+	# e2label, getcap and sgdisk out of the root. A reused GXDE root need not
+	# carry all of them -- gdisk is not part of the desktop -- so install the
+	# missing ones inside the image instead of failing half way.
+	missing=''
+	for tool in usr/bin/tar usr/bin/install usr/sbin/mkfs.ext4 usr/sbin/e2fsck \
+		usr/sbin/e2label usr/sbin/getcap usr/sbin/sgdisk; do
+		[ -e "$root/$tool" ] || missing="$missing /${tool#usr/}"
+	done
+	if [ -n "$missing" ]; then
+		say "installing the installer tools:$missing"
+		cp /etc/resolv.conf "$root/etc/resolv.conf" 2>/dev/null || true
+		chroot "$root" apt-get update -qq
+		chroot "$root" apt-get install -y --no-install-recommends e2fsprogs gdisk libcap2-bin
+	fi
 	# build-installer-runtime.py refuses to write into an existing directory.
 	rm -rf "$out_dir/installer-runtime"
 	python3 "$project_root/tools/lib/build-installer-runtime.py" \
