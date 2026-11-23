@@ -512,13 +512,138 @@ def unpack_rom(rom: str, work: str) -> dict[str, str]:
     for member in members:
         say(f"  {member.name}  {member.size}")
     images = os.path.join(work, "rom")
-    found = rom_extract(rom, ["super.img", "NON-HLOS.bin", "BTFM.bin", "vendor_boot.img"], images)
+    found = rom_extract(
+        rom,
+        ["super.img", "NON-HLOS.bin", "BTFM.bin", "vendor_boot.img", "dtbo.img"],
+        images,
+    )
     return found
 
 
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
+
+
+
+# --------------------------------------------------------------------------
+# Stock device-tree blobs
+# --------------------------------------------------------------------------
+#
+# The bootloader applies its own DTBO entries to whatever DTB we ship, and it
+# picks them by id/rev, so the boot image has to export every symbol those
+# overlays can fix up.  Two stock inputs describe that set: the 44 entries of
+# dtbo.img, and the 14 base DTBs carried in vendor_boot.img.
+#
+# build-bootimg.sh expects them as `entry.<N>` and `dtb-<NN>.dtb` files.
+
+DTBO_MAGIC = 0xD7B7AB1E
+FDT_MAGIC = b"\xd0\x0d\xfe\xed"
+
+
+def dtbo_entries(path: str) -> list[bytes]:
+    data = open(path, "rb").read()
+    if len(data) < 32:
+        die(f"{path}: too small for a dtbo image")
+    magic, _total, header_size, entry_size, count, entries_offset = struct.unpack_from("<6I", data, 0)
+    if magic != DTBO_MAGIC:
+        die(f"{path}: not a dtbo image (magic 0x{magic:08x})")
+    if count == 0 or count > 512 or entry_size < 8:
+        die(f"{path}: implausible dtbo table ({count} entries of {entry_size} bytes)")
+    entries = []
+    for index in range(count):
+        offset_field = entries_offset + index * entry_size
+        if offset_field + 8 > len(data):
+            die(f"{path}: dtbo entry {index} header is past the end of the image")
+        size, offset = struct.unpack_from("<II", data, offset_field)
+        if offset + size > len(data):
+            die(f"{path}: dtbo entry {index} runs past the end of the image")
+        entries.append(data[offset : offset + size])
+    return entries
+
+
+def fdt_blobs(blob: bytes) -> list[bytes]:
+    """Split a blob into DTBs: a dtbo table if it is one, else raw pieces."""
+    if len(blob) >= 32 and struct.unpack_from("<I", blob, 0)[0] == DTBO_MAGIC:
+        return dtbo_entries_bytes(blob)
+    parts = []
+    pos = 0
+    while True:
+        found = blob.find(FDT_MAGIC, pos)
+        if found < 0:
+            break
+        total = struct.unpack_from(">I", blob, found + 4)[0]
+        if total < 40 or found + total > len(blob):
+            pos = found + 4
+            continue
+        parts.append(blob[found : found + total])
+        pos = found + total
+    return parts
+
+
+def dtbo_entries_bytes(data: bytes) -> list[bytes]:
+    magic, _total, header_size, entry_size, count, entries_offset = struct.unpack_from("<6I", data, 0)
+    entries = []
+    for index in range(count):
+        offset_field = entries_offset + index * entry_size
+        size, offset = struct.unpack_from("<II", data, offset_field)
+        entries.append(data[offset : offset + size])
+    return entries
+
+
+def vendor_boot_dtb_section(path: str) -> bytes:
+    data = open(path, "rb").read()
+    if data[:8] != b"VNDRBOOT":
+        die(f"{path}: not a vendor_boot image")
+    version, page_size = struct.unpack_from("<II", data, 8)
+    ramdisk_size = struct.unpack_from("<I", data, 24)[0]
+    header_size = struct.unpack_from("<I", data, 2096)[0]
+    dtb_size = struct.unpack_from("<I", data, 2100)[0]
+    if version not in (3, 4):
+        say(f"{path}: vendor_boot header version {version}; reading the v3 layout")
+    if not 1024 <= header_size <= 8192 or page_size == 0:
+        die(f"{path}: implausible vendor_boot header (header_size {header_size}, page_size {page_size})")
+    start = page_size + (ramdisk_size + page_size - 1) // page_size * page_size
+    if start + dtb_size > len(data):
+        die(f"{path}: vendor_boot dtb section is past the end of the image")
+    return data[start : start + dtb_size]
+
+
+def extract_stock_dtb(dtbo_path: str, vendor_boot_path: str, out_dir: str) -> dict[str, int]:
+    entries = dtbo_entries(dtbo_path)
+    dtbs = fdt_blobs(vendor_boot_dtb_section(vendor_boot_path))
+    overlay_dir = os.path.join(out_dir, "dtbo")
+    base_dir = os.path.join(out_dir, "dtbs")
+    shutil.rmtree(overlay_dir, ignore_errors=True)
+    shutil.rmtree(base_dir, ignore_errors=True)
+    os.makedirs(overlay_dir)
+    os.makedirs(base_dir)
+    for index, entry in enumerate(entries):
+        with open(os.path.join(overlay_dir, f"entry.{index}"), "wb") as handle:
+            handle.write(entry)
+    for index, blob in enumerate(dtbs):
+        with open(os.path.join(base_dir, f"dtb-{index:02d}.dtb"), "wb") as handle:
+            handle.write(blob)
+    say(f"stock DTBO entries: {len(entries)} -> {overlay_dir}")
+    say(f"stock base DTBs: {len(dtbs)} -> {base_dir}")
+    if len(entries) != 44:
+        die(f"{dtbo_path}: expected 44 DTBO entries, found {len(entries)}")
+    if len(dtbs) != 14:
+        die(f"{vendor_boot_path}: expected 14 base DTBs, found {len(dtbs)}")
+    return {"dtbo_entries": len(entries), "base_dtbs": len(dtbs)}
+
+
+def cmd_dtb(args: argparse.Namespace) -> int:
+    if args.rom:
+        work = os.path.join(os.path.abspath(args.out), "work")
+        found = rom_extract(args.rom, ["dtbo.img", "vendor_boot.img"], os.path.join(work, "rom"))
+    else:
+        found = {"dtbo.img": args.dtbo, "vendor_boot.img": args.vendor_boot}
+    if not found.get("dtbo.img") or not found.get("vendor_boot.img"):
+        die("need both dtbo.img and vendor_boot.img (from --rom or the two paths)")
+    counts = extract_stock_dtb(found["dtbo.img"], found["vendor_boot.img"], os.path.abspath(args.out))
+    print(json.dumps(counts, indent=2))
+    return 0
 
 
 def cmd_probe(args: argparse.Namespace) -> int:
@@ -760,8 +885,22 @@ def cmd_prepare(args: argparse.Namespace) -> int:
         missing = [name for name in WLAN_INPUTS if name not in located]
         say(f"stock WLAN blobs absent ({', '.join(missing)}); using the tracked set")
 
+    say("extracting the stock DTBO entries and vendor_boot DTBs")
+    rom_dir = os.path.join(work, "rom")
+    dtbo_image = os.path.join(rom_dir, "dtbo.img")
+    if not os.path.exists(dtbo_image) and args.rom:
+        rom_extract(args.rom, ["dtbo.img"], rom_dir)
+    boot_image = os.path.join(rom_dir, "vendor_boot.img")
+    if not os.path.exists(dtbo_image) or not os.path.exists(boot_image):
+        die("the ROM archive has no dtbo.img or vendor_boot.img; the boot image needs both")
+    stock_dtb_dir = os.path.join(out, "stock-dtb")
+    dtb_counts = extract_stock_dtb(dtbo_image, boot_image, stock_dtb_dir)
+
     inputs = {
         "rom": os.path.abspath(args.rom),
+        "stock_dtb": stock_dtb_dir,
+        "dtbo_entries": dtb_counts["dtbo_entries"],
+        "base_dtbs": dtb_counts["base_dtbs"],
         "vendor_partition": vendor_name,
         "sensor_root": dest,
         "wlan_vendor": wlan_dest if len(located) == len(WLAN_INPUTS) else None,
@@ -806,6 +945,13 @@ def cmd_locate(args: argparse.Namespace) -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("dtb", help="extract the stock DTBO entries and vendor_boot base DTBs")
+    p.add_argument("--rom", help="the fastboot ROM archive to read both images from")
+    p.add_argument("--dtbo", help="an already extracted dtbo.img")
+    p.add_argument("--vendor-boot", help="an already extracted vendor_boot.img")
+    p.add_argument("--out", required=True)
+    p.set_defaults(func=cmd_dtb)
 
     p = sub.add_parser("locate", help="search images for directory-entry names")
     p.add_argument("images", nargs="+")
