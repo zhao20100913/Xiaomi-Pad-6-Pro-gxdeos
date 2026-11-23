@@ -182,6 +182,21 @@ stage_boot() {
 	[ -f "$out_dir/native-root.hashes" ] || die 'run the device stage first'
 	[ -f "$out_dir/topology/liuqin-tplg.bin" ] || die 'run the topology stage first'
 	mkdir -p "$out_dir/stock/empty-overlay" "$out_dir/stock/empty-base"
+	# The installer runtime is copied out of the root itself, so the root has to
+	# carry the tools that write and check the filesystems on the device.
+	missing=
+	for tool in /usr/bin/tar /usr/bin/install /usr/sbin/mkfs.ext4 \
+		/usr/sbin/e2fsck /usr/sbin/e2label /usr/sbin/getcap /usr/sbin/sgdisk; do
+		[ -x "$root$tool" ] || missing="$missing $tool"
+	done
+	if [ -n "$missing" ]; then
+		say "installing the installer tools:$missing"
+		[ -f "$root/etc/resolv.conf" ] || cp /etc/resolv.conf "$root/etc/resolv.conf"
+		chroot "$root" /usr/bin/env DEBIAN_FRONTEND=noninteractive \
+			apt-get update -qq >/dev/null
+		chroot "$root" /usr/bin/env DEBIAN_FRONTEND=noninteractive \
+			apt-get install -y --no-install-recommends e2fsprogs gdisk libcap2-bin
+	fi
 	# build-installer-runtime.py refuses to write into an existing directory.
 	rm -rf "$out_dir/installer-runtime"
 	python3 "$project_root/tools/lib/build-installer-runtime.py" \
