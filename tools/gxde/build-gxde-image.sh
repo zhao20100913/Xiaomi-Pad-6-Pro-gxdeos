@@ -289,7 +289,10 @@ files['bundle.json'] = sha(bundle / 'bundle.json')
 print('bundle files: ' + ', '.join(sorted(files)))
 PY
 
-	python3 "$project_root/tools/install-liuqin.py" --bundle "$bundle" --check ||
+	# The bundle is assembled offline, so it is not DEVICE_TESTED yet; --check
+	# still verifies every file against bundle.json, which --allow-unverified keeps.
+	say 'the bundle is offline-assembled: its checksums are verified, the tablet is not'
+	python3 "$project_root/tools/install-liuqin.py" --bundle "$bundle" --check --allow-unverified ||
 		die 'the installer self-check rejected the bundle'
 	say "bundle ready: $bundle"
 }
