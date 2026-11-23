@@ -46,6 +46,9 @@ mkdir -p "$out_dir"
 
 stage_stock() {
 	say 'extracting the stock device inputs'
+	# unpack_bootimg.py is needed to look for the stock WLAN blobs in the
+	# vendor_boot ramdisks, even when this stage runs on its own.
+	[ -f "$mkbootimg_dir/unpack_bootimg.py" ] || stage_tools
 	if [ -n "${SUPER_IMAGE:-}" ]; then
 		python3 "$project_root/tools/gxde/prepare-stock-inputs.py" prepare \
 			--super "$SUPER_IMAGE" --out "$out_dir/stock"
