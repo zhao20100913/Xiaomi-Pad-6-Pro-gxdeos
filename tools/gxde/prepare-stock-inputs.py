@@ -541,55 +541,46 @@ DTBO_MAGIC = 0xD7B7AB1E
 FDT_MAGIC = b"\xd0\x0d\xfe\xed"
 
 
+def dtbo_header(data: bytes, label: str) -> tuple[str, int, int, int, int]:
+    """Return (struct order, header_size, entry_size, count, entries_offset).
+
+    AOSP writes the dtbo header little-endian, but images produced by Qualcomm
+    tooling store every field big-endian -- including the magic, whose bytes are
+    the literal d7 b7 ab 1e. Pick whichever order yields a plausible table.
+    """
+    for order in ("<", ">"):
+        fields = struct.unpack_from(order + "6I", data, 0)
+        if fields[0] != DTBO_MAGIC:
+            continue
+        _total, header_size, entry_size, count, entries_offset = fields[1:]
+        if 0 < count <= 512 and 8 <= entry_size <= 512 and header_size >= 32:
+            return order, header_size, entry_size, count, entries_offset
+    die(f"{label}: not a dtbo image (magic 0x{data[:4].hex()})")
+
+
 def dtbo_entries(path: str) -> list[bytes]:
     data = open(path, "rb").read()
     if len(data) < 32:
         die(f"{path}: too small for a dtbo image")
-    magic, _total, header_size, entry_size, count, entries_offset = struct.unpack_from("<6I", data, 0)
-    # AOSP defines DT_TABLE_MAGIC = 0xd7b7ab1e, and images in the wild carry it
-    # both ways round: as a little-endian word and as the literal byte order
-    # d7 b7 ab 1e. Accept both; the rest of the header is always little-endian.
-    if magic != DTBO_MAGIC and struct.unpack_from(">I", data, 0)[0] != DTBO_MAGIC:
-        die(f"{path}: not a dtbo image (magic 0x{data[:4].hex()})")
-    if count == 0 or count > 512 or entry_size < 8:
-        die(f"{path}: implausible dtbo table ({count} entries of {entry_size} bytes)")
+    order, _header_size, entry_size, count, entries_offset = dtbo_header(data, path)
     entries = []
     for index in range(count):
         offset_field = entries_offset + index * entry_size
         if offset_field + 8 > len(data):
             die(f"{path}: dtbo entry {index} header is past the end of the image")
-        size, offset = struct.unpack_from("<II", data, offset_field)
+        size, offset = struct.unpack_from(order + "II", data, offset_field)
         if offset + size > len(data):
             die(f"{path}: dtbo entry {index} runs past the end of the image")
         entries.append(data[offset : offset + size])
     return entries
 
 
-def fdt_blobs(blob: bytes) -> list[bytes]:
-    """Split a blob into DTBs: a dtbo table if it is one, else raw pieces."""
-    if len(blob) >= 32 and struct.unpack_from("<I", blob, 0)[0] == DTBO_MAGIC:
-        return dtbo_entries_bytes(blob)
-    parts = []
-    pos = 0
-    while True:
-        found = blob.find(FDT_MAGIC, pos)
-        if found < 0:
-            break
-        total = struct.unpack_from(">I", blob, found + 4)[0]
-        if total < 40 or found + total > len(blob):
-            pos = found + 4
-            continue
-        parts.append(blob[found : found + total])
-        pos = found + total
-    return parts
-
-
 def dtbo_entries_bytes(data: bytes) -> list[bytes]:
-    magic, _total, header_size, entry_size, count, entries_offset = struct.unpack_from("<6I", data, 0)
+    order, _header_size, entry_size, count, entries_offset = dtbo_header(data, "dtbo table")
     entries = []
     for index in range(count):
         offset_field = entries_offset + index * entry_size
-        size, offset = struct.unpack_from("<II", data, offset_field)
+        size, offset = struct.unpack_from(order + "II", data, offset_field)
         entries.append(data[offset : offset + size])
     return entries
 
