@@ -62,7 +62,7 @@ permissions:
   actions: read
 concurrency:
   group: gxde-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   kernel:
