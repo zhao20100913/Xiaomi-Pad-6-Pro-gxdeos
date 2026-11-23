@@ -603,6 +603,32 @@ def vendor_boot_dtb_section(path: str) -> bytes:
     return data[start : start + dtb_size]
 
 
+def fdt_blobs(blob: bytes) -> list[bytes]:
+    """Split a blob into DTBs: a dtbo table when it carries one, else raw pieces."""
+    if len(blob) >= 32:
+        for order in ("<", ">"):
+            if struct.unpack_from(order + "I", blob, 0)[0] == DTBO_MAGIC:
+                try:
+                    return dtbo_entries_bytes(blob)
+                except SystemExit:
+                    break
+    parts: list[bytes] = []
+    pos = 0
+    while True:
+        found = blob.find(FDT_MAGIC, pos)
+        if found < 0:
+            break
+        if found + 8 > len(blob):
+            break
+        total = struct.unpack_from(">I", blob, found + 4)[0]
+        if total < 40 or found + total > len(blob):
+            pos = found + 4
+            continue
+        parts.append(blob[found : found + total])
+        pos = found + total
+    return parts
+
+
 def extract_stock_dtb(dtbo_path: str, vendor_boot_path: str, out_dir: str) -> dict[str, int]:
     entries = dtbo_entries(dtbo_path)
     dtbs = fdt_blobs(vendor_boot_dtb_section(vendor_boot_path))
