@@ -181,48 +181,48 @@ stage_boot() {
 	case $out_dir in "$project_root"/out/*) ;; *) die 'boot output must live below out/' ;; esac
 	[ -f "$out_dir/native-root.hashes" ] || die 'run the device stage first'
 	[ -f "$out_dir/topology/liuqin-tplg.bin" ] || die 'run the topology stage first'
-	mkdir -p "$out_dir/stock/empty-overlay" "$out_dir/stock/empty-base"
-	# The installer runtime is copied out of the root itself, so the root has to
-	# carry the tools that write and check the filesystems on the device.
-	missing=
-	for tool in /usr/bin/tar /usr/bin/install /usr/sbin/mkfs.ext4 \
-		/usr/sbin/e2fsck /usr/sbin/e2label /usr/sbin/getcap /usr/sbin/sgdisk; do
-		[ -x "$root$tool" ] || missing="$missing $tool"
-	done
-	if [ -n "$missing" ]; then
-		say "installing the installer tools:$missing"
-		[ -f "$root/etc/resolv.conf" ] || cp /etc/resolv.conf "$root/etc/resolv.conf"
-		chroot "$root" /usr/bin/env DEBIAN_FRONTEND=noninteractive \
-			apt-get update -qq >/dev/null
-		chroot "$root" /usr/bin/env DEBIAN_FRONTEND=noninteractive \
-			apt-get install -y --no-install-recommends e2fsprogs gdisk libcap2-bin
+	# The ABL overlay sink needs the stock DTBO entries and the stock base
+	# DTBs: ABL applies overlays we cannot see offline, so the boot DTB has to
+	# export the union of every symbol they may reference.
+	stock_dtb=${STOCK_DTB_DIR:-"$out_dir/stock/stock-dtb"}
+	overlay_dir="$stock_dtb/dtbo"
+	base_dir="$stock_dtb/dtbs"
+	overlay_count=$(find "$overlay_dir" -maxdepth 1 -type f -regex '.*/entry\.[0-9]+' 2>/dev/null | wc -l)
+	base_count=$(find "$base_dir" -maxdepth 1 -type f -regex '.*/dtb-[0-9][0-9]\.dtb' 2>/dev/null | wc -l)
+	if [ "$overlay_count" -ne 44 ] || [ "$base_count" -ne 14 ]; then
+		python3 "$project_root/tools/gxde/prepare-stock-inputs.py" dtb \
+			--dtbo "$out_dir/stock/work/rom/dtbo.img" \
+			--vendor-boot "$out_dir/stock/work/rom/vendor_boot.img" \
+			--out "$stock_dtb" || die 'the stock DTBO entries and vendor_boot DTBs are required for the ABL overlay sink'
+		overlay_count=$(find "$overlay_dir" -maxdepth 1 -type f -regex '.*/entry\.[0-9]+' | wc -l)
+		base_count=$(find "$base_dir" -maxdepth 1 -type f -regex '.*/dtb-[0-9][0-9]\.dtb' | wc -l)
 	fi
+	[ "$overlay_count" -eq 44 ] || die "expected 44 stock DTBO entries in $overlay_dir, found $overlay_count"
+	[ "$base_count" -eq 14 ] || die "expected 14 stock base DTBs in $base_dir, found $base_count"
+	say "ABL overlay sink: $overlay_count DTBO entries, $base_count base DTBs"
 	# build-installer-runtime.py refuses to write into an existing directory.
 	rm -rf "$out_dir/installer-runtime"
 	python3 "$project_root/tools/lib/build-installer-runtime.py" \
 		--root "$root" --out "$out_dir/installer-runtime"
 	rm -rf "$out_dir/boot" "$out_dir/installer"
-	# build-initramfs.sh builds the fsck helper out of a stage-2 root.
-	ROOT_FSCK_ROOT="$root" UBUNTU_DESKTOP_ROOT="$root" \
 	OUT_DIR="$out_dir/boot" \
 	NATIVE_ROOT_HASHES="$out_dir/native-root.hashes" \
 	AUDIO_TOPOLOGY="$out_dir/topology/liuqin-tplg.bin" \
 	FIRMWARE_POOL="$out_dir/firmware-pool" \
 	WLAN_HSP2_TUPLE="$out_dir/wlan" \
-	STOCK_OVERLAY_DIR="$out_dir/stock/empty-overlay" \
-	STOCK_BASE_DIR="$out_dir/stock/empty-base" \
+	STOCK_OVERLAY_DIR="$overlay_dir" \
+	STOCK_BASE_DIR="$base_dir" \
 	MKBOOTIMG_DIR="$mkbootimg_dir" \
 	KERNEL_SOURCE="$kernel_source" KERNEL_OUT="$kernel_out" \
 		sh "$project_root/tools/build-liuqin-native-boot.sh"
-	ROOT_FSCK_ROOT="$root" UBUNTU_DESKTOP_ROOT="$root" \
 	OUT_DIR="$out_dir/installer" \
 	INSTALLER_RUNTIME="$out_dir/installer-runtime" \
 	NATIVE_ROOT_HASHES="$out_dir/native-root.hashes" \
 	AUDIO_TOPOLOGY="$out_dir/topology/liuqin-tplg.bin" \
 	FIRMWARE_POOL="$out_dir/firmware-pool" \
 	WLAN_HSP2_TUPLE="$out_dir/wlan" \
-	STOCK_OVERLAY_DIR="$out_dir/stock/empty-overlay" \
-	STOCK_BASE_DIR="$out_dir/stock/empty-base" \
+	STOCK_OVERLAY_DIR="$overlay_dir" \
+	STOCK_BASE_DIR="$base_dir" \
 	MKBOOTIMG_DIR="$mkbootimg_dir" \
 	KERNEL_SOURCE="$kernel_source" KERNEL_OUT="$kernel_out" \
 		sh "$project_root/tools/build-liuqin-native-boot.sh"
@@ -307,10 +307,7 @@ files['bundle.json'] = sha(bundle / 'bundle.json')
 print('bundle files: ' + ', '.join(sorted(files)))
 PY
 
-	# The bundle is assembled offline, so it is not DEVICE_TESTED yet; --check
-	# still verifies every file against bundle.json, which --allow-unverified keeps.
-	say 'the bundle is offline-assembled: its checksums are verified, the tablet is not'
-	python3 "$project_root/tools/install-liuqin.py" --bundle "$bundle" --check --allow-unverified ||
+	python3 "$project_root/tools/install-liuqin.py" --bundle "$bundle" --check ||
 		die 'the installer self-check rejected the bundle'
 	say "bundle ready: $bundle"
 }
