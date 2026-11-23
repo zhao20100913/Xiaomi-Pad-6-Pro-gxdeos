@@ -182,7 +182,8 @@ stage_boot() {
 	[ -f "$out_dir/native-root.hashes" ] || die 'run the device stage first'
 	[ -f "$out_dir/topology/liuqin-tplg.bin" ] || die 'run the topology stage first'
 	mkdir -p "$out_dir/stock/empty-overlay" "$out_dir/stock/empty-base"
-	mkdir -p "$out_dir/installer-runtime"
+	# build-installer-runtime.py refuses to write into an existing directory.
+	rm -rf "$out_dir/installer-runtime"
 	python3 "$project_root/tools/lib/build-installer-runtime.py" \
 		--root "$root" --out "$out_dir/installer-runtime"
 	rm -rf "$out_dir/boot" "$out_dir/installer"
