@@ -66,7 +66,8 @@ mesa-vulkan-drivers libgl1-mesa-dri libegl-mesa0 libgbm1 \
 pipewire pipewire-pulse wireplumber libspa-0.2-bluetooth alsa-ucm-conf \
 bluez network-manager upower systemd-zram-generator gnome-keyring polkitd pkexec \
 fonts-noto-cjk fonts-noto-color-emoji fonts-symbola xdg-user-dirs xdg-utils \
-sudo locales tzdata zstd unzip"
+sudo locales tzdata zstd unzip \
+e2fsprogs gdisk libcap2-bin"
 
 # Best-effort extras: a missing optional package must not fail the port.
 optional_packages="iio-sensor-proxy libqrtr1 libprotobuf-c1 python3-gi python3-pyudev \
