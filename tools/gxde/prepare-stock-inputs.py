@@ -546,8 +546,11 @@ def dtbo_entries(path: str) -> list[bytes]:
     if len(data) < 32:
         die(f"{path}: too small for a dtbo image")
     magic, _total, header_size, entry_size, count, entries_offset = struct.unpack_from("<6I", data, 0)
-    if magic != DTBO_MAGIC:
-        die(f"{path}: not a dtbo image (magic 0x{magic:08x})")
+    # AOSP defines DT_TABLE_MAGIC = 0xd7b7ab1e, and images in the wild carry it
+    # both ways round: as a little-endian word and as the literal byte order
+    # d7 b7 ab 1e. Accept both; the rest of the header is always little-endian.
+    if magic != DTBO_MAGIC and struct.unpack_from(">I", data, 0)[0] != DTBO_MAGIC:
+        die(f"{path}: not a dtbo image (magic 0x{data[:4].hex()})")
     if count == 0 or count > 512 or entry_size < 8:
         die(f"{path}: implausible dtbo table ({count} entries of {entry_size} bytes)")
     entries = []
