@@ -202,6 +202,8 @@ stage_boot() {
 	python3 "$project_root/tools/lib/build-installer-runtime.py" \
 		--root "$root" --out "$out_dir/installer-runtime"
 	rm -rf "$out_dir/boot" "$out_dir/installer"
+	# build-initramfs.sh builds the fsck helper out of a stage-2 root.
+	ROOT_FSCK_ROOT="$root" UBUNTU_DESKTOP_ROOT="$root" \
 	OUT_DIR="$out_dir/boot" \
 	NATIVE_ROOT_HASHES="$out_dir/native-root.hashes" \
 	AUDIO_TOPOLOGY="$out_dir/topology/liuqin-tplg.bin" \
@@ -212,6 +214,7 @@ stage_boot() {
 	MKBOOTIMG_DIR="$mkbootimg_dir" \
 	KERNEL_SOURCE="$kernel_source" KERNEL_OUT="$kernel_out" \
 		sh "$project_root/tools/build-liuqin-native-boot.sh"
+	ROOT_FSCK_ROOT="$root" UBUNTU_DESKTOP_ROOT="$root" \
 	OUT_DIR="$out_dir/installer" \
 	INSTALLER_RUNTIME="$out_dir/installer-runtime" \
 	NATIVE_ROOT_HASHES="$out_dir/native-root.hashes" \
